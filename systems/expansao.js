@@ -64,9 +64,10 @@ async function moodleLogin(ra, digito, senha) {
   const puppeteer = require("puppeteer");
   const espera = (ms) => new Promise(r => setTimeout(r, ms));
 
+  const proxyArgs = process.env.PROXY_URL ? [`--proxy-server=${process.env.PROXY_URL}`] : [];
   const browser = await puppeteer.launch({
     headless: true,
-    args: ["--no-sandbox", "--disable-setuid-sandbox"],
+    args: ["--no-sandbox", "--disable-setuid-sandbox", ...proxyArgs],
   });
 
   try {
@@ -308,9 +309,10 @@ async function rodarAtividadesSecao(sessao, itens, onProgresso) {
   const puppeteer = require("puppeteer");
   const espera = (ms) => new Promise(r => setTimeout(r, ms));
 
+  const proxyArgs = process.env.PROXY_URL ? [`--proxy-server=${process.env.PROXY_URL}`] : [];
   const browser = await puppeteer.launch({
     headless: true,
-    args: ["--no-sandbox", "--disable-setuid-sandbox"],
+    args: ["--no-sandbox", "--disable-setuid-sandbox", ...proxyArgs],
   });
 
   try {
