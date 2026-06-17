@@ -54,74 +54,6 @@ const EXPANSAO_BASE = "https://expansao.educacao.sp.gov.br";
 const DATA_DIR = path.resolve(__dirname, "data");
 const ACCOUNTS_FILE = path.join(DATA_DIR, "accounts.json");
 
-// ============================================================
-// OTIMIZAÇÕES DE MEMÓRIA (Puppeteer/Chromium)
-// O Chromium é o maior consumidor de RAM do bot, não o Node.js.
-// As opções abaixo reduzem bastante o footprint de cada instância.
-// ============================================================
-
-// "shell" = chrome-headless-shell, um binário bem mais leve que o Chrome
-// completo (sem GPU/compositor visual), ideal para automação que só lê DOM.
-// Requer puppeteer >= 20. Se der erro ao iniciar, troque "shell" por `true`
-// (você perde parte da economia, mas o resto das otimizações continua valendo).
-const PUPPETEER_LAUNCH_OPTS = {
-  headless: "shell",
-  args: [
-    "--no-sandbox",
-    "--disable-setuid-sandbox",
-    "--disable-dev-shm-usage", // evita usar /dev/shm (pequeno em containers) e usa disco
-    "--disable-gpu",
-    "--disable-software-rasterizer",
-    "--disable-extensions",
-    "--disable-background-networking",
-    "--disable-background-timer-throttling",
-    "--disable-backgrounding-occluded-windows",
-    "--disable-breakpad",
-    "--disable-component-extensions-with-background-pages",
-    "--disable-features=TranslateUI,BlinkGenPropertyTrees",
-    "--disable-ipc-flooding-protection",
-    "--disable-renderer-backgrounding",
-    "--disable-sync",
-    "--metrics-recording-only",
-    "--mute-audio",
-    "--no-first-run",
-    "--no-default-browser-check",
-    "--js-flags=--max-old-space-size=256", // limita o heap V8 usado pelas páginas renderizadas
-  ],
-};
-
-// Bloqueia imagem/fonte/vídeo/CSS: o bot só precisa ler texto e clicar em
-// elementos do DOM, não precisa renderizar nada visualmente. Isso é o que
-// mais pesa em RAM (principalmente vídeos e imagens de capa das atividades).
-// Se algum clique parar de funcionar, tente remover "stylesheet" desta lista.
-async function otimizarPagina(page) {
-  try {
-    await page.setRequestInterception(true);
-    page.on("request", (req) => {
-      const tipo = req.resourceType();
-      if (tipo === "image" || tipo === "font" || tipo === "media" || tipo === "stylesheet") {
-        req.abort().catch(() => {});
-      } else {
-        req.continue().catch(() => {});
-      }
-    });
-  } catch (_) {}
-}
-
-// Garante que browser.close() realmente mate o processo do Chromium.
-// Se close() falhar/travar, força kill — evita "processos zumbi" acumulando RAM.
-async function fecharBrowserComSeguranca(browser) {
-  try {
-    await browser.close();
-  } catch (_) {
-    try { browser.process()?.kill("SIGKILL"); } catch (_) {}
-  }
-}
-
-// Evita que o mesmo usuário rode 2 instâncias do Chromium em paralelo
-// (ex: clique duplo no botão), o que dobraria o uso de memória.
-const usuariosProcessando = new Set();
-
 function carregarDados() {
   try {
     if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
@@ -169,13 +101,15 @@ async function moodleLogin(ra, digito, senha) {
   const puppeteer = require("puppeteer");
   const espera = (ms) => new Promise(r => setTimeout(r, ms));
 
-  const browser = await puppeteer.launch(PUPPETEER_LAUNCH_OPTS);
+  const browser = await puppeteer.launch({
+    headless: true,
+    args: ["--no-sandbox", "--disable-setuid-sandbox"],
+  });
 
   try {
-    let page = await browser.newPage();
+    const page = await browser.newPage();
     await page.setViewport({ width: 1280, height: 800 });
     await page.setUserAgent(UA);
-    await otimizarPagina(page);
 
     await page.goto(`${SF_BASE}/escolha-de-perfil`, { waitUntil: "networkidle2", timeout: 30000 });
     await espera(2000);
@@ -275,12 +209,7 @@ async function moodleLogin(ra, digito, senha) {
     }
     if (!novaAba) throw new Error("Nova aba não abriu em 20s");
 
-    // Fecha a aba antiga (SED/Sala do Futuro) — não é mais usada e fica
-    // ocupando memória de um processo de renderização inteiro até o browser.close().
-    await page.close().catch(() => {});
-
     await novaAba.setUserAgent(UA);
-    await otimizarPagina(novaAba);
     await espera(3000);
 
     await novaAba.waitForFunction(() => window.M?.cfg?.sesskey, { timeout: 30000 });
@@ -303,7 +232,7 @@ async function moodleLogin(ra, digito, senha) {
 
     return { sesskey, moodleCookies, nome, moodleUserId };
   } finally {
-    await fecharBrowserComSeguranca(browser);
+    await browser.close();
   }
 }
 
@@ -416,25 +345,22 @@ async function rodarAtividadesSecao(sessao, itens, onProgresso) {
   const puppeteer = require("puppeteer");
   const espera = (ms) => new Promise(r => setTimeout(r, ms));
 
-  const browser = await puppeteer.launch(PUPPETEER_LAUNCH_OPTS);
+  const browser = await puppeteer.launch({
+    headless: true,
+    args: ["--no-sandbox", "--disable-setuid-sandbox"],
+  });
 
   try {
+    const page = await browser.newPage();
+    await page.setViewport({ width: 1280, height: 800 });
+    await page.setUserAgent(UA);
+
     const dominio = new URL(EXPANSAO_BASE).hostname;
     const cookiesToSet = sessao.moodleCookies.map(raw => {
       const eqIdx = raw.indexOf("=");
       return { name: raw.slice(0, eqIdx), value: raw.slice(eqIdx + 1), domain: dominio, path: "/" };
     });
-
-    async function novaPaginaPronta() {
-      const p = await browser.newPage();
-      await p.setViewport({ width: 1280, height: 800 });
-      await p.setUserAgent(UA);
-      await otimizarPagina(p);
-      await p.setCookie(...cookiesToSet);
-      return p;
-    }
-
-    let page = await novaPaginaPronta();
+    await page.setCookie(...cookiesToSet);
 
     const itensComUrl = itens.filter(cm => cm.url);
     let concluidos = 0;
@@ -469,20 +395,12 @@ async function rodarAtividadesSecao(sessao, itens, onProgresso) {
         await onProgresso({ index: i, total: itensComUrl.length, nome, status: "erro", concluidos });
       }
 
-      // Recicla a página a cada 6 atividades: fecha o processo de renderização
-      // atual e abre um novo, liberando memória acumulada em listas longas
-      // (SPAs como Moodle tendem a não soltar tudo de volta só navegando).
-      if ((i + 1) % 6 === 0 && i < itensComUrl.length - 1) {
-        try { await page.close(); } catch (_) {}
-        page = await novaPaginaPronta();
-      }
-
       if (i < itensComUrl.length - 1) await espera(600);
     }
 
     return { concluidos, total: itensComUrl.length };
   } finally {
-    await fecharBrowserComSeguranca(browser);
+    await browser.close();
   }
 }
 
@@ -801,11 +719,6 @@ module.exports = (client) => {
         return interaction.update({ content: "❌ Conta não encontrada.", embeds: [], components: [] });
       }
 
-      if (usuariosProcessando.has(userId)) {
-        return interaction.update({ content: "⏳ Já existe uma operação em andamento para você. Aguarde terminar.", embeds: [], components: [] });
-      }
-      usuariosProcessando.add(userId);
-
       await interaction.update({
         embeds: [new EmbedBuilder()
           .setColor(0x5865f2)
@@ -831,8 +744,6 @@ module.exports = (client) => {
           )],
           components: [],
         });
-      } finally {
-        usuariosProcessando.delete(userId);
       }
       return;
     }
@@ -841,12 +752,6 @@ module.exports = (client) => {
       const ra    = interaction.fields.getTextInputValue("ra").trim();
       const dg    = interaction.fields.getTextInputValue("dg").trim();
       const senha = interaction.fields.getTextInputValue("senha").trim();
-      const userId = interaction.user.id;
-
-      if (usuariosProcessando.has(userId)) {
-        return interaction.reply({ flags: 64, content: "⏳ Já existe uma operação em andamento para você. Aguarde terminar." });
-      }
-      usuariosProcessando.add(userId);
 
       await interaction.reply({
         flags: 64,
@@ -857,8 +762,8 @@ module.exports = (client) => {
         const { sesskey, moodleCookies, nome, moodleUserId } = await moodleLogin(ra, dg, senha);
         const cursos = await buscarCursosDoUsuario(sesskey, moodleCookies, moodleUserId);
         const conta = { ra, dg, senha, sesskey, moodleCookies, nome: nome || `${ra}-${dg}`, moodleUserId, cursos, loginAt: Date.now() };
-        salvarConta(userId, conta);
-        setSessaoAtiva(userId, conta);
+        salvarConta(interaction.user.id, conta);
+        setSessaoAtiva(interaction.user.id, conta);
         await mostrarCursos(interaction, conta);
       } catch (err) {
         await interaction.editReply({
@@ -868,8 +773,6 @@ module.exports = (client) => {
               : `Erro inesperado: \`${err.message}\``
           )],
         });
-      } finally {
-        usuariosProcessando.delete(userId);
       }
       return;
     }
@@ -901,13 +804,7 @@ module.exports = (client) => {
       const sessao = getSessaoAtiva(interaction.user.id);
       if (!sessao) return interaction.reply({ flags: 64, content: "❌ Sessão expirada. Use `!expansao` para logar novamente." });
 
-      const userId = interaction.user.id;
-      if (usuariosProcessando.has(userId)) {
-        return interaction.reply({ flags: 64, content: "⏳ Já existe uma operação em andamento para você. Aguarde terminar." });
-      }
-      usuariosProcessando.add(userId);
-
-      cancelarAutoAdvance(userId);
+      cancelarAutoAdvance(interaction.user.id);
       const courseId = parseInt(interaction.customId.replace("sf_select_secao_", ""));
       const sectionId = parseInt(interaction.values[0]);
 
@@ -920,7 +817,6 @@ module.exports = (client) => {
         itens = listarAtividadesDaSecao(data, sectionId);
         if (!itens.length) throw new Error("Nenhuma atividade nesta seção");
       } catch (err) {
-        usuariosProcessando.delete(userId);
         await interaction.update({
           embeds: [new EmbedBuilder().setColor(0xe74c3c).setTitle("❌ Erro").setDescription(`\`${err.message}\``)],
           components: [],
@@ -981,9 +877,7 @@ module.exports = (client) => {
             components: [botoesRow],
           });
         } catch (_) {}
-      }).catch(() => {}).finally(() => {
-        usuariosProcessando.delete(userId);
-      });
+      }).catch(() => {});
 
       return;
     }
