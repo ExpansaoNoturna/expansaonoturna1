@@ -10,6 +10,42 @@ const {
 } = require("discord.js");
 const fs = require("fs");
 const path = require("path");
+const crypto = require("crypto");
+
+const KEY_FILE = path.resolve(__dirname, "data", ".enc_key");
+
+function _getKey() {
+  const dir = path.resolve(__dirname, "data");
+  if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+  if (fs.existsSync(KEY_FILE)) return Buffer.from(fs.readFileSync(KEY_FILE, "utf-8").trim(), "hex");
+  const k = crypto.randomBytes(32);
+  fs.writeFileSync(KEY_FILE, k.toString("hex"), "utf-8");
+  return k;
+}
+
+const ENC_KEY = _getKey();
+
+function encryptSenha(text) {
+  if (!text) return text;
+  const iv = crypto.randomBytes(12);
+  const cipher = crypto.createCipheriv("aes-256-gcm", ENC_KEY, iv);
+  const enc = Buffer.concat([cipher.update(String(text), "utf-8"), cipher.final()]);
+  const tag = cipher.getAuthTag();
+  return iv.toString("hex") + ":" + tag.toString("hex") + ":" + enc.toString("hex");
+}
+
+function decryptSenha(value) {
+  if (!value || typeof value !== "string") return value;
+  const parts = value.split(":");
+  if (parts.length !== 3) return value;
+  try {
+    const decipher = crypto.createDecipheriv("aes-256-gcm", ENC_KEY, Buffer.from(parts[0], "hex"));
+    decipher.setAuthTag(Buffer.from(parts[1], "hex"));
+    return Buffer.concat([decipher.update(Buffer.from(parts[2], "hex")), decipher.final()]).toString("utf-8");
+  } catch (e) {
+    return value;
+  }
+}
 
 const UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/146.0.0.0 Safari/537.36";
 const SF_BASE = "https://saladofuturo.educacao.sp.gov.br";
@@ -42,14 +78,15 @@ function getSessaoAtiva(userId) {
 }
 
 function getContas(userId) {
-  return dados[userId]?.contas || [];
+  return (dados[userId]?.contas || []).map(c => ({ ...c, senha: decryptSenha(c.senha) }));
 }
 
 function salvarConta(userId, conta) {
   if (!dados[userId]) dados[userId] = { sessaoAtiva: null, contas: [] };
+  const contaParaSalvar = { ...conta, senha: encryptSenha(conta.senha) };
   const idx = dados[userId].contas.findIndex(c => c.ra === conta.ra && c.dg === conta.dg);
-  if (idx >= 0) dados[userId].contas[idx] = conta;
-  else dados[userId].contas.push(conta);
+  if (idx >= 0) dados[userId].contas[idx] = contaParaSalvar;
+  else dados[userId].contas.push(contaParaSalvar);
   dados[userId].sessaoAtiva = conta;
   salvarDados(dados);
 }
@@ -64,10 +101,9 @@ async function moodleLogin(ra, digito, senha) {
   const puppeteer = require("puppeteer");
   const espera = (ms) => new Promise(r => setTimeout(r, ms));
 
-  const proxyArgs = process.env.PROXY_URL ? [`--proxy-server=${process.env.PROXY_URL}`] : [];
   const browser = await puppeteer.launch({
     headless: true,
-    args: ["--no-sandbox", "--disable-setuid-sandbox", ...proxyArgs],
+    args: ["--no-sandbox", "--disable-setuid-sandbox"],
   });
 
   try {
@@ -309,10 +345,9 @@ async function rodarAtividadesSecao(sessao, itens, onProgresso) {
   const puppeteer = require("puppeteer");
   const espera = (ms) => new Promise(r => setTimeout(r, ms));
 
-  const proxyArgs = process.env.PROXY_URL ? [`--proxy-server=${process.env.PROXY_URL}`] : [];
   const browser = await puppeteer.launch({
     headless: true,
-    args: ["--no-sandbox", "--disable-setuid-sandbox", ...proxyArgs],
+    args: ["--no-sandbox", "--disable-setuid-sandbox"],
   });
 
   try {
