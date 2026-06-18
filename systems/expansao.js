@@ -276,23 +276,15 @@ async function moodleLogin(ra, digito, senha) {
     });
     if (!clicouAcessar) throw new Error("Botão Acessar não encontrado");
 
-    try {
-      await page.waitForNavigation({ waitUntil: "networkidle2", timeout: 35000 });
-    } catch (e) {
-      // Se der timeout ou frame detached mas a página mudou, continua
-      if (page.url().includes("escolha-de-perfil")) {
-        throw e;
-      }
-    }
+    await page.waitForNavigation({ waitUntil: "networkidle2", timeout: 30000 }).catch(() => {});
     await espera(3000);
 
-    // Se a página ainda estiver exibindo os inputs de login após clicar em Acessar, ou se o endereço tiver explicitamente 'login'
-    const temCamposLogin = await page.evaluate(() => {
-      return !!document.querySelector('#input-usuario-sed') || !!document.querySelector('#input-senha');
-    }).catch(() => false);
-
-    if (page.url().includes("login") || (page.url().includes("escolha-de-perfil") && temCamposLogin)) {
-      throw new Error("RA, dígito ou senha incorretos.");
+    if (page.url().includes("login") || page.url().includes("escolha-de-perfil") && !page.url().includes("plataformas")) {
+      // Mas só se o botão de acessar ou inputs ainda estiverem lá
+      const temForm = await page.evaluate(() => !!document.querySelector('#input-senha')).catch(() => false);
+      if (temForm) {
+        throw new Error("RA, dígito ou senha incorretos.");
+      }
     }
 
     const nome = await page.evaluate(() => {
@@ -300,15 +292,8 @@ async function moodleLogin(ra, digito, senha) {
       return el ? el.textContent.trim() : null;
     }).catch(() => null);
 
-    try {
-      await page.goto(`${SF_BASE}/plataformas`, { waitUntil: "networkidle2", timeout: 35000 });
-    } catch (e) {
-      // Tenta novamente ou continua se já estiver na página
-      if (!page.url().includes("plataformas")) {
-        await page.goto(`${SF_BASE}/plataformas`, { waitUntil: "domcontentloaded", timeout: 20000 });
-      }
-    }
-    await espera(4000);
+    await page.goto(`${SF_BASE}/plataformas`, { waitUntil: "networkidle2", timeout: 30000 });
+    await espera(3000);
 
     await page.waitForSelector('[class*="MuiSelect-select"]', { timeout: 10000 });
     await espera(1000);
