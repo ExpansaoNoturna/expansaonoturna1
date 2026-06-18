@@ -300,8 +300,8 @@ async function buscarCursosDoUsuario(sesskey, moodleCookies, moodleUserId) {
       return lista.map(c => {
         const nome = (c.fullname || c.shortname || `Curso ${c.id}`).replace(/\s+/g, " ").trim();
         const resumo = (c.summary || "").replace(/<[^>]*>/g, "").trim().slice(0, 200);
-        const bimMatch = (nome + " " + resumo).match(/(\d)[°º]\s*[Bb]imestre/) || (nome + " " + resumo).match(/[Bb]imestre\s*(\d)/);
-        const bimestre = bimMatch ? `${bimMatch[1]}°` : "";
+        const bimMatch = (nome + " " + resumo).match(/(0?[1-9])[°º]?\s*[-–—]?\s*[Bb]imestre/i) || (nome + " " + resumo).match(/[Bb]imestre\s*[-–—]?\s*(0?[1-9])[°º]?/i);
+        const bimestre = bimMatch ? `${parseInt(bimMatch[1])}°` : "";
         return { id: c.id, fullname: nome, summary: resumo, atividades: null, bimestre };
       }).filter(c => c.id > 1);
     }
@@ -312,8 +312,8 @@ async function buscarCursosDoUsuario(sesskey, moodleCookies, moodleUserId) {
     return lista.map(c => {
       const nome = (c.fullname || c.shortname || `Curso ${c.id}`).replace(/\s+/g, " ").trim();
       const resumo = (c.summary || "").replace(/<[^>]*>/g, "").trim().slice(0, 200);
-      const bimMatch = (nome + " " + resumo).match(/(\d)[°º]\s*[Bb]imestre/) || (nome + " " + resumo).match(/[Bb]imestre\s*(\d)/);
-      const bimestre = bimMatch ? `${bimMatch[1]}°` : "";
+      const bimMatch = (nome + " " + resumo).match(/(0?[1-9])[°º]?\s*[-–—]?\s*[Bb]imestre/i) || (nome + " " + resumo).match(/[Bb]imestre\s*[-–—]?\s*(0?[1-9])[°º]?/i);
+      const bimestre = bimMatch ? `${parseInt(bimMatch[1])}°` : "";
       return { id: c.id, fullname: nome, summary: resumo, atividades: null, bimestre };
     }).filter(c => c.id > 1);
   } catch (e) {
@@ -518,8 +518,8 @@ module.exports = (client) => {
     if (!secoes.length) throw new Error("Nenhuma aula encontrada neste curso");
 
     function detectarBimestreSecao(titulo) {
-      const m = titulo.match(/(\d)[°º]\s*[Bb]imestre/) || titulo.match(/[Bb]imestre\s*(\d)/) || titulo.match(/B(\d)/i);
-      return m ? `${m[1]}° Bimestre` : "";
+      const m = titulo.match(/(0?[1-9])[°º]?\s*[-–—]?\s*[Bb]imestre/i) || titulo.match(/[Bb]imestre\s*[-–—]?\s*(0?[1-9])[°º]?/i) || titulo.match(/B(\d)/i);
+      return m ? `${parseInt(m[1])}° Bimestre` : "";
     }
 
     function contarAtividades(secao) {
