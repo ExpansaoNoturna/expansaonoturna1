@@ -121,8 +121,12 @@ function processQueue() {
       .catch(() => {})
       .then(() => {
         nextTask.taskFn()
-          .then(nextTask.resolve)
-          .catch(nextTask.reject)
+          .then((res) => {
+            nextTask.resolve(res);
+          })
+          .catch((err) => {
+            nextTask.reject(err);
+          })
           .finally(() => {
             runningTasks--;
             processQueue();
@@ -387,6 +391,24 @@ async function buscarCursosDoUsuario(sesskey, moodleCookies, moodleUserId) {
 
     const cursosRaw = result?.[0]?.data || result?.[0];
 
+    // Função interna para limpar o nome e extrair o bimestre de forma ampla
+    function extrairCursoInfos(c) {
+      const nome = (c.fullname || c.shortname || `Curso ${c.id}`).replace(/\s+/g, " ").trim();
+      const resumo = (c.summary || "").replace(/<[^>]*>/g, "").trim().slice(0, 200);
+      
+      let bimestre = "";
+      const textoBusca = (nome + " " + resumo).toUpperCase();
+      const bimMatch = textoBusca.match(/(0?[1-9])[°º]?\s*[-–—]?\s*BIMESTRE/i) || 
+                       textoBusca.match(/BIMESTRE\s*[-–—]?\s*(0?[1-9])[°º]?/i) ||
+                       textoBusca.match(/B([1-4])\b/i) ||
+                       textoBusca.match(/\b([1-4])B\b/i);
+
+      if (bimMatch) {
+        bimestre = `${parseInt(bimMatch[1])}°`;
+      }
+      return { id: c.id, fullname: nome, summary: resumo, atividades: null, bimestre };
+    }
+
     if (!cursosRaw || cursosRaw.error || cursosRaw.exception) {
       const fallbackRes = await fetch(
         `${EXPANSAO_BASE}/lib/ajax/service.php?sesskey=${sesskey}&info=core_course_get_enrolled_courses_by_timeline_classification`,
@@ -412,25 +434,13 @@ async function buscarCursosDoUsuario(sesskey, moodleCookies, moodleUserId) {
       const parsed = typeof fallbackCursos === "string" ? JSON.parse(fallbackCursos) : fallbackCursos;
       const lista = Array.isArray(parsed) ? parsed : (parsed?.courses || []);
 
-      return lista.map(c => {
-        const nome = (c.fullname || c.shortname || `Curso ${c.id}`).replace(/\s+/g, " ").trim();
-        const resumo = (c.summary || "").replace(/<[^>]*>/g, "").trim().slice(0, 200);
-        const bimMatch = (nome + " " + resumo).match(/(0?[1-9])[°º]?\s*[-–—]?\s*[Bb]imestre/i) || (nome + " " + resumo).match(/[Bb]imestre\s*[-–—]?\s*(0?[1-9])[°º]?/i);
-        const bimestre = bimMatch ? `${parseInt(bimMatch[1])}°` : "";
-        return { id: c.id, fullname: nome, summary: resumo, atividades: null, bimestre };
-      }).filter(c => c.id > 1);
+      return lista.map(extrairCursoInfos).filter(c => c.id > 1);
     }
 
     let lista = typeof cursosRaw === "string" ? JSON.parse(cursosRaw) : cursosRaw;
     if (!Array.isArray(lista)) lista = lista?.courses || [];
 
-    return lista.map(c => {
-      const nome = (c.fullname || c.shortname || `Curso ${c.id}`).replace(/\s+/g, " ").trim();
-      const resumo = (c.summary || "").replace(/<[^>]*>/g, "").trim().slice(0, 200);
-      const bimMatch = (nome + " " + resumo).match(/(0?[1-9])[°º]?\s*[-–—]?\s*[Bb]imestre/i) || (nome + " " + resumo).match(/[Bb]imestre\s*[-–—]?\s*(0?[1-9])[°º]?/i);
-      const bimestre = bimMatch ? `${parseInt(bimMatch[1])}°` : "";
-      return { id: c.id, fullname: nome, summary: resumo, atividades: null, bimestre };
-    }).filter(c => c.id > 1);
+    return lista.map(extrairCursoInfos).filter(c => c.id > 1);
   } catch (e) {
     return [];
   }
