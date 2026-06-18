@@ -73,121 +73,6 @@ function salvarDados(dados) {
 
 let dados = carregarDados();
 
-const queue = [];
-let runningTasks = 0;
-const MAX_CONCURRENT = 2;
-
-async function enqueueTask(userId, interaction, taskFn, taskName) {
-  if (runningTasks < MAX_CONCURRENT) {
-    runningTasks++;
-    try {
-      return await taskFn();
-    } finally {
-      runningTasks--;
-      processQueue();
-    }
-  }
-
-  return new Promise((resolve, reject) => {
-    queue.push({ userId, interaction, taskFn, resolve, reject, taskName, timestamp: Date.now() });
-    
-    const posicao = queue.length;
-    const embed = new EmbedBuilder()
-      .setColor(0xe67e22)
-      .setTitle("⏳ Fila Cheia")
-      .setDescription(`Todos os slots de execução estão ocupados. Você foi adicionado à fila de espera na posição **#${posicao}**.\n\nAguarde, sua execução começará automaticamente assim que liberar um slot.`)
-      .setFooter({ text: "Expansão Noturno • Seduc-SP" });
-    
-    if (interaction.deferred || interaction.replied) {
-      interaction.editReply({ embeds: [embed], components: [] }).catch(() => {});
-    } else {
-      interaction.reply({ flags: 64, embeds: [embed] }).catch(() => {});
-    }
-  });
-}
-
-function processQueue() {
-  if (queue.length > 0 && runningTasks < MAX_CONCURRENT) {
-    const nextTask = queue.shift();
-    runningTasks++;
-    
-    const embed = new EmbedBuilder()
-      .setColor(0x5865f2)
-      .setTitle("⚡ Sua vez chegou!")
-      .setDescription(`Iniciando a tarefa: **${nextTask.taskName}**...`)
-      .setFooter({ text: "Expansão Noturno • Seduc-SP" });
-       
-    nextTask.interaction.editReply({ embeds: [embed], components: [] })
-      .catch(() => {})
-      .then(() => {
-        nextTask.taskFn()
-          .then(nextTask.resolve)
-          .catch(nextTask.reject)
-          .finally(() => {
-            runningTasks--;
-            processQueue();
-          });
-      });
-  }
-  
-  queue.forEach((item, index) => {
-    const posicao = index + 1;
-    const embed = new EmbedBuilder()
-      .setColor(0xe67e22)
-      .setTitle("⏳ Fila Cheia")
-      .setDescription(`Aguardando slot livre. Sua posição atual na fila é **#${posicao}**.\n\nSua execução começará automaticamente assim que liberar um slot.`)
-      .setFooter({ text: "Expansão Noturno • Seduc-SP" });
-    item.interaction.editReply({ embeds: [embed], components: [] }).catch(() => {});
-  });
-}
-
-const userTimeouts = new Map();
-
-function resetInactivityTimeout(userId, interaction) {
-  if (userTimeouts.has(userId)) {
-    clearTimeout(userTimeouts.get(userId));
-  }
-
-  const timer = setTimeout(async () => {
-    userTimeouts.delete(userId);
-    
-    if (dados[userId]) {
-      dados[userId].sessaoAtiva = null;
-      salvarDados(dados);
-    }
-
-    const qIdx = queue.findIndex(item => item.userId === userId);
-    if (qIdx >= 0) {
-      const removed = queue.splice(qIdx, 1)[0];
-      removed.reject(new Error("Sessão expirada por inatividade"));
-      processQueue();
-    }
-
-    try {
-      const embed = new EmbedBuilder()
-        .setColor(0xc0392b)
-        .setTitle("⚠️ Sessão Expirada")
-        .setDescription("Sua sessão expirou por inatividade (2 minutos sem resposta). Use `!expansao` para iniciar novamente.")
-        .setFooter({ text: "Expansão Noturno • Seduc-SP" });
-      
-      await interaction.editReply({ embeds: [embed], components: [] });
-    } catch (err) {
-      try {
-        await interaction.followUp({ content: `<@${userId}>, sua sessão expirou por inatividade.`, flags: 64 });
-      } catch (_) {}
-    }
-  }, 120000);
-
-  userTimeouts.set(userId, timer);
-}
-
-function clearInactivityTimeout(userId) {
-  if (userTimeouts.has(userId)) {
-    clearTimeout(userTimeouts.get(userId));
-    userTimeouts.delete(userId);
-  }
-}
-
 function getSessaoAtiva(userId) {
   return dados[userId]?.sessaoAtiva || null;
 }
@@ -218,17 +103,7 @@ async function moodleLogin(ra, digito, senha) {
 
   const browser = await puppeteer.launch({
     headless: true,
-    args: [
-      "--no-sandbox",
-      "--disable-setuid-sandbox",
-      "--disable-dev-shm-usage",
-      "--disable-gpu",
-      "--disable-software-rasterizer",
-      "--disable-extensions",
-      "--no-zygote",
-      "--no-first-run",
-      "--single-process",
-    ],
+    args: ["--no-sandbox", "--disable-setuid-sandbox"],
   });
 
   try {
@@ -266,24 +141,21 @@ async function moodleLogin(ra, digito, senha) {
     await page.type('#input-senha', String(senha).trim(), { delay: 50 });
     await espera(500);
 
-    await Promise.all([
-      page.waitForNavigation({ waitUntil: "networkidle2", timeout: 35000 }).catch(() => {}),
-      page.evaluate(() => {
-        let btn = [...document.querySelectorAll('button')].find(b => b.textContent.trim() === 'Acessar');
-        if (!btn) btn = [...document.querySelectorAll('button')].find(b => b.textContent.trim().toLowerCase().includes('acessar'));
-        if (!btn) btn = document.querySelector('button[type="submit"]');
-        if (!btn) btn = [...document.querySelectorAll('button')].find(b => !b.disabled);
-        if (btn) btn.click();
-      }).catch(() => {})
-    ]);
-    await espera(3000);
+    const clicouAcessar = await page.evaluate(() => {
+      let btn = [...document.querySelectorAll('button')].find(b => b.textContent.trim() === 'Acessar');
+      if (!btn) btn = [...document.querySelectorAll('button')].find(b => b.textContent.trim().toLowerCase().includes('acessar'));
+      if (!btn) btn = document.querySelector('button[type="submit"]');
+      if (!btn) btn = [...document.querySelectorAll('button')].find(b => !b.disabled);
+      if (btn) { btn.click(); return btn.textContent.trim(); }
+      return null;
+    });
+    if (!clicouAcessar) throw new Error("Botão Acessar não encontrado");
 
-    if (page.url().includes("login") || page.url().includes("escolha-de-perfil") && !page.url().includes("plataformas")) {
-      // Mas só se o botão de acessar ou inputs ainda estiverem lá
-      const temForm = await page.evaluate(() => !!document.querySelector('#input-senha')).catch(() => false);
-      if (temForm) {
-        throw new Error("RA, dígito ou senha incorretos.");
-      }
+    await page.waitForNavigation({ waitUntil: "networkidle2", timeout: 20000 });
+    await espera(2000);
+
+    if (page.url().includes("login") || page.url().includes("escolha")) {
+      throw new Error("RA, dígito ou senha incorretos.");
     }
 
     const nome = await page.evaluate(() => {
@@ -291,7 +163,7 @@ async function moodleLogin(ra, digito, senha) {
       return el ? el.textContent.trim() : null;
     }).catch(() => null);
 
-    await page.goto(`${SF_BASE}/plataformas`, { waitUntil: "networkidle2", timeout: 30000 });
+    await page.goto(`${SF_BASE}/plataformas`, { waitUntil: "networkidle2", timeout: 20000 });
     await espera(3000);
 
     await page.waitForSelector('[class*="MuiSelect-select"]', { timeout: 10000 });
@@ -428,8 +300,8 @@ async function buscarCursosDoUsuario(sesskey, moodleCookies, moodleUserId) {
       return lista.map(c => {
         const nome = (c.fullname || c.shortname || `Curso ${c.id}`).replace(/\s+/g, " ").trim();
         const resumo = (c.summary || "").replace(/<[^>]*>/g, "").trim().slice(0, 200);
-        const bimMatch = (nome + " " + resumo).match(/(0?[1-9])[°º]?\s*[-–—]?\s*[Bb]imestre/i) || (nome + " " + resumo).match(/[Bb]imestre\s*[-–—]?\s*(0?[1-9])[°º]?/i);
-        const bimestre = bimMatch ? `${parseInt(bimMatch[1])}°` : "";
+        const bimMatch = (nome + " " + resumo).match(/(\d)[°º]\s*[Bb]imestre/) || (nome + " " + resumo).match(/[Bb]imestre\s*(\d)/);
+        const bimestre = bimMatch ? `${bimMatch[1]}°` : "";
         return { id: c.id, fullname: nome, summary: resumo, atividades: null, bimestre };
       }).filter(c => c.id > 1);
     }
@@ -440,8 +312,8 @@ async function buscarCursosDoUsuario(sesskey, moodleCookies, moodleUserId) {
     return lista.map(c => {
       const nome = (c.fullname || c.shortname || `Curso ${c.id}`).replace(/\s+/g, " ").trim();
       const resumo = (c.summary || "").replace(/<[^>]*>/g, "").trim().slice(0, 200);
-      const bimMatch = (nome + " " + resumo).match(/(0?[1-9])[°º]?\s*[-–—]?\s*[Bb]imestre/i) || (nome + " " + resumo).match(/[Bb]imestre\s*[-–—]?\s*(0?[1-9])[°º]?/i);
-      const bimestre = bimMatch ? `${parseInt(bimMatch[1])}°` : "";
+      const bimMatch = (nome + " " + resumo).match(/(\d)[°º]\s*[Bb]imestre/) || (nome + " " + resumo).match(/[Bb]imestre\s*(\d)/);
+      const bimestre = bimMatch ? `${bimMatch[1]}°` : "";
       return { id: c.id, fullname: nome, summary: resumo, atividades: null, bimestre };
     }).filter(c => c.id > 1);
   } catch (e) {
@@ -475,17 +347,7 @@ async function rodarAtividadesSecao(sessao, itens, onProgresso) {
 
   const browser = await puppeteer.launch({
     headless: true,
-    args: [
-      "--no-sandbox",
-      "--disable-setuid-sandbox",
-      "--disable-dev-shm-usage",
-      "--disable-gpu",
-      "--disable-software-rasterizer",
-      "--disable-extensions",
-      "--no-zygote",
-      "--no-first-run",
-      "--single-process",
-    ],
+    args: ["--no-sandbox", "--disable-setuid-sandbox"],
   });
 
   try {
@@ -640,7 +502,6 @@ module.exports = (client) => {
       embeds: [embed],
       components: [new ActionRowBuilder().addComponents(select)],
     });
-    resetInactivityTimeout(interaction.user.id, interaction);
   }
 
   async function mostrarSecoes(interaction, courseId) {
@@ -657,8 +518,8 @@ module.exports = (client) => {
     if (!secoes.length) throw new Error("Nenhuma aula encontrada neste curso");
 
     function detectarBimestreSecao(titulo) {
-      const m = titulo.match(/(0?[1-9])[°º]?\s*[-–—]?\s*[Bb]imestre/i) || titulo.match(/[Bb]imestre\s*[-–—]?\s*(0?[1-9])[°º]?/i) || titulo.match(/B(\d)/i);
-      return m ? `${parseInt(m[1])}° Bimestre` : "";
+      const m = titulo.match(/(\d)[°º]\s*[Bb]imestre/) || titulo.match(/[Bb]imestre\s*(\d)/) || titulo.match(/B(\d)/i);
+      return m ? `${m[1]}° Bimestre` : "";
     }
 
     function contarAtividades(secao) {
@@ -711,7 +572,6 @@ module.exports = (client) => {
         botoes,
       ],
     });
-    resetInactivityTimeout(interaction.user.id, interaction);
   }
 
   async function mostrarAtividadesSecao(interaction, courseId, sectionId) {
@@ -774,7 +634,6 @@ module.exports = (client) => {
     );
 
     await interaction.editReply({ embeds: [embed], components: [botoesRow] });
-    resetInactivityTimeout(interaction.user.id, interaction);
 
     cancelarAutoAdvance(interaction.user.id);
     if (temProximo) {
@@ -798,8 +657,6 @@ module.exports = (client) => {
   });
 
   client.on("interactionCreate", async (interaction) => {
-    const userId = interaction.user.id;
-    clearInactivityTimeout(userId);
 
     if (interaction.isButton() && interaction.customId === "sf_nova_conta") {
       try {
@@ -821,6 +678,7 @@ module.exports = (client) => {
     }
 
     if (interaction.isButton() && interaction.customId === "sf_contas_salvas") {
+      const userId = interaction.user.id;
       const contas = getContas(userId);
 
       if (!contas.length) {
@@ -848,11 +706,11 @@ module.exports = (client) => {
         embeds: [embed],
         components: [new ActionRowBuilder().addComponents(select)],
       });
-      resetInactivityTimeout(userId, interaction);
       return;
     }
 
     if (interaction.isStringSelectMenu() && interaction.customId === "sf_select_conta") {
+      const userId = interaction.user.id;
       const contas = getContas(userId);
       const idx = parseInt(interaction.values[0]);
       const conta = contas[idx];
@@ -870,15 +728,14 @@ module.exports = (client) => {
         components: [],
       });
 
-      enqueueTask(userId, interaction, async () => {
+      try {
         const { sesskey, moodleCookies, nome, moodleUserId } = await moodleLogin(conta.ra, conta.dg, conta.senha);
         const cursos = await buscarCursosDoUsuario(sesskey, moodleCookies, moodleUserId);
         const contaAtualizada = { ...conta, sesskey, moodleCookies, nome: nome || conta.nome, moodleUserId, cursos, loginAt: Date.now() };
         salvarConta(userId, contaAtualizada);
         setSessaoAtiva(userId, contaAtualizada);
         await mostrarCursos(interaction, contaAtualizada);
-      }, "Login de Conta Salva").catch(async (err) => {
-        if (err.message === "Sessão expirada por inatividade") return;
+      } catch (err) {
         await interaction.editReply({
           embeds: [new EmbedBuilder().setColor(0xe74c3c).setTitle("❌ Falha no acesso").setDescription(
             err.message.includes("incorretos") || err.message.includes("senha")
@@ -887,7 +744,7 @@ module.exports = (client) => {
           )],
           components: [],
         });
-      });
+      }
       return;
     }
 
@@ -901,15 +758,14 @@ module.exports = (client) => {
         embeds: [new EmbedBuilder().setColor(0x5865f2).setTitle("⏳ Autenticando...").setDescription("🔄 Abrindo Sala do Futuro...").setFooter({ text: "Expansão Noturno • Seduc-SP" })],
       });
 
-      enqueueTask(userId, interaction, async () => {
+      try {
         const { sesskey, moodleCookies, nome, moodleUserId } = await moodleLogin(ra, dg, senha);
         const cursos = await buscarCursosDoUsuario(sesskey, moodleCookies, moodleUserId);
         const conta = { ra, dg, senha, sesskey, moodleCookies, nome: nome || `${ra}-${dg}`, moodleUserId, cursos, loginAt: Date.now() };
-        salvarConta(userId, conta);
-        setSessaoAtiva(userId, conta);
+        salvarConta(interaction.user.id, conta);
+        setSessaoAtiva(interaction.user.id, conta);
         await mostrarCursos(interaction, conta);
-      }, "Autenticação de Nova Conta").catch(async (err) => {
-        if (err.message === "Sessão expirada por inatividade") return;
+      } catch (err) {
         await interaction.editReply({
           embeds: [new EmbedBuilder().setColor(0xe74c3c).setTitle("❌ Falha no acesso").setDescription(
             err.message.includes("incorretos") || err.message.includes("senha")
@@ -917,15 +773,15 @@ module.exports = (client) => {
               : `Erro inesperado: \`${err.message}\``
           )],
         });
-      });
+      }
       return;
     }
 
     if (interaction.isStringSelectMenu() && interaction.customId === "select_curso") {
-      const sessao = getSessaoAtiva(userId);
+      const sessao = getSessaoAtiva(interaction.user.id);
       if (!sessao) return interaction.reply({ flags: 64, content: "❌ Sessão expirada. Use `!expansao` para logar novamente." });
 
-      cancelarAutoAdvance(userId);
+      cancelarAutoAdvance(interaction.user.id);
       const courseId = parseInt(interaction.values[0]);
 
       await interaction.update({
@@ -945,10 +801,10 @@ module.exports = (client) => {
     }
 
     if (interaction.isStringSelectMenu() && interaction.customId.startsWith("sf_select_secao_")) {
-      const sessao = getSessaoAtiva(userId);
+      const sessao = getSessaoAtiva(interaction.user.id);
       if (!sessao) return interaction.reply({ flags: 64, content: "❌ Sessão expirada. Use `!expansao` para logar novamente." });
 
-      cancelarAutoAdvance(userId);
+      cancelarAutoAdvance(interaction.user.id);
       const courseId = parseInt(interaction.customId.replace("sf_select_secao_", ""));
       const sectionId = parseInt(interaction.values[0]);
 
@@ -987,59 +843,50 @@ module.exports = (client) => {
         components: [],
       });
 
-      enqueueTask(userId, interaction, async () => {
-        await rodarAtividadesSecao(sessao, itens, async ({ index, total, nome, status, concluidos }) => {
-          const icons = { abrindo: "🔄", ok: "✅", erro: "⚠️" };
-          const colors = { abrindo: 0x5865f2, ok: 0x2ecc71, erro: 0xe67e22 };
-          const desc = status === "ok"
-            ? `✅ **${nome}**\n\n${barraProgresso(concluidos, total)}`
-            : `${icons[status]} **${nome}**\n\n${barraProgresso(concluidos, total)}`;
+      rodarAtividadesSecao(sessao, itens, async ({ index, total, nome, status, concluidos }) => {
+        const icons = { abrindo: "🔄", ok: "✅", erro: "⚠️" };
+        const colors = { abrindo: 0x5865f2, ok: 0x2ecc71, erro: 0xe67e22 };
+        const desc = status === "ok"
+          ? `✅ **${nome}**\n\n${barraProgresso(concluidos, total)}`
+          : `${icons[status]} **${nome}**\n\n${barraProgresso(concluidos, total)}`;
 
-          try {
-            await interaction.editReply({
-              embeds: [new EmbedBuilder()
-                .setColor(colors[status] || 0x5865f2)
-                .setTitle(`📖 ${secaoNome}`)
-                .setDescription(desc)
-                .setFooter({ text: `${curso?.nome || ""} • Expansão Noturno` })
-              ],
-              components: [],
-            });
-          } catch (_) {}
-        }).then(async ({ concluidos, total }) => {
-          const botoesRow = new ActionRowBuilder().addComponents(
-            new ButtonBuilder().setCustomId(`sf_voltar_secoes_${courseId}`).setLabel("📖 Outras aulas").setStyle(ButtonStyle.Secondary),
-            new ButtonBuilder().setCustomId("voltar_cursos").setLabel("📚 Outros cursos").setStyle(ButtonStyle.Secondary),
-          );
-          try {
-            await interaction.editReply({
-              embeds: [new EmbedBuilder()
-                .setColor(concluidos === total ? 0x2ecc71 : 0xe67e22)
-                .setTitle(`${concluidos === total ? "🏁" : "⚠️"} ${secaoNome} — Concluída`)
-                .setDescription(`**${concluidos}/${total}** atividades executadas com sucesso.`)
-                .setFooter({ text: `${curso?.nome || ""} • Expansão Noturno` })
-              ],
-              components: [botoesRow],
-            });
-            resetInactivityTimeout(userId, interaction);
-          } catch (_) {}
-        });
-      }, `Executar Aulas (${secaoNome})`).catch(async (err) => {
-        if (err.message === "Sessão expirada por inatividade") return;
-        await interaction.editReply({
-          embeds: [new EmbedBuilder().setColor(0xe74c3c).setTitle("❌ Erro").setDescription(`Erro na execução: \`${err.message}\``)],
-          components: [],
-        });
-      });
+        try {
+          await interaction.editReply({
+            embeds: [new EmbedBuilder()
+              .setColor(colors[status] || 0x5865f2)
+              .setTitle(`📖 ${secaoNome}`)
+              .setDescription(desc)
+              .setFooter({ text: `${curso?.nome || ""} • Expansão Noturno` })
+            ],
+            components: [],
+          });
+        } catch (_) {}
+      }).then(async ({ concluidos, total }) => {
+        const botoesRow = new ActionRowBuilder().addComponents(
+          new ButtonBuilder().setCustomId(`sf_voltar_secoes_${courseId}`).setLabel("📖 Outras aulas").setStyle(ButtonStyle.Secondary),
+          new ButtonBuilder().setCustomId("voltar_cursos").setLabel("📚 Outros cursos").setStyle(ButtonStyle.Secondary),
+        );
+        try {
+          await interaction.editReply({
+            embeds: [new EmbedBuilder()
+              .setColor(concluidos === total ? 0x2ecc71 : 0xe67e22)
+              .setTitle(`${concluidos === total ? "🏁" : "⚠️"} ${secaoNome} — Concluída`)
+              .setDescription(`**${concluidos}/${total}** atividades executadas com sucesso.`)
+              .setFooter({ text: `${curso?.nome || ""} • Expansão Noturno` })
+            ],
+            components: [botoesRow],
+          });
+        } catch (_) {}
+      }).catch(() => {});
 
       return;
     }
 
     if (interaction.isButton() && interaction.customId.startsWith("sf_ativ_")) {
-      const sessao = getSessaoAtiva(userId);
+      const sessao = getSessaoAtiva(interaction.user.id);
       if (!sessao) return interaction.reply({ flags: 64, content: "❌ Sessão expirada. Use `!expansao` para logar novamente." });
 
-      cancelarAutoAdvance(userId);
+      cancelarAutoAdvance(interaction.user.id);
       const parts = interaction.customId.split("_");
       const courseId = parseInt(parts[2]);
       const sectionId = parseInt(parts[3]);
@@ -1062,10 +909,10 @@ module.exports = (client) => {
     }
 
     if (interaction.isButton() && interaction.customId.startsWith("sf_voltar_secao_")) {
-      const sessao = getSessaoAtiva(userId);
+      const sessao = getSessaoAtiva(interaction.user.id);
       if (!sessao) return interaction.reply({ flags: 64, content: "❌ Sessão expirada. Use `!expansao` para logar novamente." });
 
-      cancelarAutoAdvance(userId);
+      cancelarAutoAdvance(interaction.user.id);
       const parts = interaction.customId.replace("sf_voltar_secao_", "").split("_");
       const courseId = parseInt(parts[0]);
       const sectionId = parseInt(parts[1]);
@@ -1087,10 +934,10 @@ module.exports = (client) => {
     }
 
     if (interaction.isButton() && interaction.customId.startsWith("sf_voltar_secoes_")) {
-      const sessao = getSessaoAtiva(userId);
+      const sessao = getSessaoAtiva(interaction.user.id);
       if (!sessao) return interaction.reply({ flags: 64, content: "❌ Sessão expirada. Use `!expansao` para logar novamente." });
 
-      cancelarAutoAdvance(userId);
+      cancelarAutoAdvance(interaction.user.id);
       const courseId = parseInt(interaction.customId.replace("sf_voltar_secoes_", ""));
 
       await interaction.update({
@@ -1110,10 +957,10 @@ module.exports = (client) => {
     }
 
     if (interaction.isButton() && interaction.customId === "voltar_cursos") {
-      const sessao = getSessaoAtiva(userId);
+      const sessao = getSessaoAtiva(interaction.user.id);
       if (!sessao) return interaction.reply({ flags: 64, content: "❌ Sessão expirada. Use `!expansao` para logar novamente." });
 
-      cancelarAutoAdvance(userId);
+      cancelarAutoAdvance(interaction.user.id);
       await interaction.update({
         embeds: [new EmbedBuilder().setColor(0x5865f2).setTitle("⏳ Carregando...").setDescription("🔄 Voltando aos cursos...").setFooter({ text: "Expansão Noturno • Seduc-SP" })],
         components: [],
@@ -1135,7 +982,6 @@ module.exports = (client) => {
         embeds: [embed],
         components: [new ActionRowBuilder().addComponents(select)],
       });
-      resetInactivityTimeout(userId, interaction);
       return;
     }
 
