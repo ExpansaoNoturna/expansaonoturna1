@@ -276,10 +276,17 @@ async function moodleLogin(ra, digito, senha) {
     });
     if (!clicouAcessar) throw new Error("Botão Acessar não encontrado");
 
-    await page.waitForNavigation({ waitUntil: "networkidle2", timeout: 20000 });
-    await espera(2000);
+    try {
+      await page.waitForNavigation({ waitUntil: "networkidle2", timeout: 35000 });
+    } catch (e) {
+      // Se der timeout ou frame detached mas a página mudou, continua
+      if (page.url().includes("escolha-de-perfil")) {
+        throw e;
+      }
+    }
+    await espera(3000);
 
-    if (page.url().includes("login") || page.url().includes("escolha")) {
+    if (page.url().includes("login") || page.url().includes("escolha-de-perfil")) {
       throw new Error("RA, dígito ou senha incorretos.");
     }
 
@@ -288,8 +295,15 @@ async function moodleLogin(ra, digito, senha) {
       return el ? el.textContent.trim() : null;
     }).catch(() => null);
 
-    await page.goto(`${SF_BASE}/plataformas`, { waitUntil: "networkidle2", timeout: 20000 });
-    await espera(3000);
+    try {
+      await page.goto(`${SF_BASE}/plataformas`, { waitUntil: "networkidle2", timeout: 35000 });
+    } catch (e) {
+      // Tenta novamente ou continua se já estiver na página
+      if (!page.url().includes("plataformas")) {
+        await page.goto(`${SF_BASE}/plataformas`, { waitUntil: "domcontentloaded", timeout: 20000 });
+      }
+    }
+    await espera(4000);
 
     await page.waitForSelector('[class*="MuiSelect-select"]', { timeout: 10000 });
     await espera(1000);
