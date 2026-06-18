@@ -286,7 +286,12 @@ async function moodleLogin(ra, digito, senha) {
     }
     await espera(3000);
 
-    if (page.url().includes("login") || page.url().includes("escolha-de-perfil")) {
+    // Se a página ainda estiver exibindo os inputs de login após clicar em Acessar, ou se o endereço tiver explicitamente 'login'
+    const temCamposLogin = await page.evaluate(() => {
+      return !!document.querySelector('#input-usuario-sed') || !!document.querySelector('#input-senha');
+    }).catch(() => false);
+
+    if (page.url().includes("login") || (page.url().includes("escolha-de-perfil") && temCamposLogin)) {
       throw new Error("RA, dígito ou senha incorretos.");
     }
 
