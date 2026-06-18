@@ -266,17 +266,16 @@ async function moodleLogin(ra, digito, senha) {
     await page.type('#input-senha', String(senha).trim(), { delay: 50 });
     await espera(500);
 
-    const clicouAcessar = await page.evaluate(() => {
-      let btn = [...document.querySelectorAll('button')].find(b => b.textContent.trim() === 'Acessar');
-      if (!btn) btn = [...document.querySelectorAll('button')].find(b => b.textContent.trim().toLowerCase().includes('acessar'));
-      if (!btn) btn = document.querySelector('button[type="submit"]');
-      if (!btn) btn = [...document.querySelectorAll('button')].find(b => !b.disabled);
-      if (btn) { btn.click(); return btn.textContent.trim(); }
-      return null;
-    });
-    if (!clicouAcessar) throw new Error("Botão Acessar não encontrado");
-
-    await page.waitForNavigation({ waitUntil: "networkidle2", timeout: 30000 }).catch(() => {});
+    await Promise.all([
+      page.waitForNavigation({ waitUntil: "networkidle2", timeout: 35000 }).catch(() => {}),
+      page.evaluate(() => {
+        let btn = [...document.querySelectorAll('button')].find(b => b.textContent.trim() === 'Acessar');
+        if (!btn) btn = [...document.querySelectorAll('button')].find(b => b.textContent.trim().toLowerCase().includes('acessar'));
+        if (!btn) btn = document.querySelector('button[type="submit"]');
+        if (!btn) btn = [...document.querySelectorAll('button')].find(b => !b.disabled);
+        if (btn) btn.click();
+      }).catch(() => {})
+    ]);
     await espera(3000);
 
     if (page.url().includes("login") || page.url().includes("escolha-de-perfil") && !page.url().includes("plataformas")) {
