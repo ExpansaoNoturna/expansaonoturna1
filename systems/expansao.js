@@ -73,125 +73,6 @@ function salvarDados(dados) {
 
 let dados = carregarDados();
 
-const queue = [];
-let runningTasks = 0;
-const MAX_CONCURRENT = 2;
-
-async function enqueueTask(userId, interaction, taskFn, taskName) {
-  if (runningTasks < MAX_CONCURRENT) {
-    runningTasks++;
-    try {
-      return await taskFn();
-    } finally {
-      runningTasks--;
-      processQueue();
-    }
-  }
-
-  return new Promise((resolve, reject) => {
-    queue.push({ userId, interaction, taskFn, resolve, reject, taskName, timestamp: Date.now() });
-    
-    const posicao = queue.length;
-    const embed = new EmbedBuilder()
-      .setColor(0xe67e22)
-      .setTitle("⏳ Fila Cheia")
-      .setDescription(`Todos os slots de execução estão ocupados. Você foi adicionado à fila de espera na posição **#${posicao}**.\n\nAguarde, sua execução começará automaticamente assim que liberar um slot.`)
-      .setFooter({ text: "Expansão Noturno • Seduc-SP" });
-    
-    if (interaction.deferred || interaction.replied) {
-      interaction.editReply({ embeds: [embed], components: [] }).catch(() => {});
-    } else {
-      interaction.reply({ flags: 64, embeds: [embed] }).catch(() => {});
-    }
-  });
-}
-
-function processQueue() {
-  if (queue.length > 0 && runningTasks < MAX_CONCURRENT) {
-    const nextTask = queue.shift();
-    runningTasks++;
-    
-    const embed = new EmbedBuilder()
-      .setColor(0x5865f2)
-      .setTitle("⚡ Sua vez chegou!")
-      .setDescription(`Iniciando a tarefa: **${nextTask.taskName}**...`)
-      .setFooter({ text: "Expansão Noturno • Seduc-SP" });
-       
-    nextTask.interaction.editReply({ embeds: [embed], components: [] })
-      .catch(() => {})
-      .then(() => {
-        nextTask.taskFn()
-          .then((res) => {
-            nextTask.resolve(res);
-          })
-          .catch((err) => {
-            nextTask.reject(err);
-          })
-          .finally(() => {
-            runningTasks--;
-            processQueue();
-          });
-      });
-  }
-  
-  queue.forEach((item, index) => {
-    const posicao = index + 1;
-    const embed = new EmbedBuilder()
-      .setColor(0xe67e22)
-      .setTitle("⏳ Fila Cheia")
-      .setDescription(`Aguardando slot livre. Sua posição atual na fila é **#${posicao}**.\n\nSua execução começará automaticamente assim que liberar um slot.`)
-      .setFooter({ text: "Expansão Noturno • Seduc-SP" });
-    item.interaction.editReply({ embeds: [embed], components: [] }).catch(() => {});
-  });
-}
-
-const userTimeouts = new Map();
-
-function resetInactivityTimeout(userId, interaction) {
-  if (userTimeouts.has(userId)) {
-    clearTimeout(userTimeouts.get(userId));
-  }
-
-  const timer = setTimeout(async () => {
-    userTimeouts.delete(userId);
-    
-    if (dados[userId]) {
-      dados[userId].sessaoAtiva = null;
-      salvarDados(dados);
-    }
-
-    const qIdx = queue.findIndex(item => item.userId === userId);
-    if (qIdx >= 0) {
-      const removed = queue.splice(qIdx, 1)[0];
-      removed.reject(new Error("Sessão expirada por inatividade"));
-      processQueue();
-    }
-
-    try {
-      const embed = new EmbedBuilder()
-        .setColor(0xc0392b)
-        .setTitle("⚠️ Sessão Expirada")
-        .setDescription("Sua sessão expirou por inatividade (2 minutos sem resposta). Use `!expansao` para iniciar novamente.")
-        .setFooter({ text: "Expansão Noturno • Seduc-SP" });
-      
-      await interaction.editReply({ embeds: [embed], components: [] });
-    } catch (err) {
-      try {
-        await interaction.followUp({ content: `<@${userId}>, sua sessão expirou por inatividade.`, flags: 64 });
-      } catch (_) {}
-    }
-  }, 120000);
-
-  userTimeouts.set(userId, timer);
-}
-
-function clearInactivityTimeout(userId) {
-  if (userTimeouts.has(userId)) {
-    clearTimeout(userTimeouts.get(userId));
-    userTimeouts.delete(userId);
-  }
-}
-
 function getSessaoAtiva(userId) {
   return dados[userId]?.sessaoAtiva || null;
 }
@@ -391,24 +272,6 @@ async function buscarCursosDoUsuario(sesskey, moodleCookies, moodleUserId) {
 
     const cursosRaw = result?.[0]?.data || result?.[0];
 
-    // Função interna para limpar o nome e extrair o bimestre de forma ampla
-    function extrairCursoInfos(c) {
-      const nome = (c.fullname || c.shortname || `Curso ${c.id}`).replace(/\s+/g, " ").trim();
-      const resumo = (c.summary || "").replace(/<[^>]*>/g, "").trim().slice(0, 200);
-      
-      let bimestre = "";
-      const textoBusca = (nome + " " + resumo).toUpperCase();
-      const bimMatch = textoBusca.match(/(0?[1-9])[°º]?\s*[-–—]?\s*BIMESTRE/i) || 
-                       textoBusca.match(/BIMESTRE\s*[-–—]?\s*(0?[1-9])[°º]?/i) ||
-                       textoBusca.match(/B([1-4])\b/i) ||
-                       textoBusca.match(/\b([1-4])B\b/i);
-
-      if (bimMatch) {
-        bimestre = `${parseInt(bimMatch[1])}°`;
-      }
-      return { id: c.id, fullname: nome, summary: resumo, atividades: null, bimestre };
-    }
-
     if (!cursosRaw || cursosRaw.error || cursosRaw.exception) {
       const fallbackRes = await fetch(
         `${EXPANSAO_BASE}/lib/ajax/service.php?sesskey=${sesskey}&info=core_course_get_enrolled_courses_by_timeline_classification`,
@@ -434,13 +297,25 @@ async function buscarCursosDoUsuario(sesskey, moodleCookies, moodleUserId) {
       const parsed = typeof fallbackCursos === "string" ? JSON.parse(fallbackCursos) : fallbackCursos;
       const lista = Array.isArray(parsed) ? parsed : (parsed?.courses || []);
 
-      return lista.map(extrairCursoInfos).filter(c => c.id > 1);
+      return lista.map(c => {
+        const nome = (c.fullname || c.shortname || `Curso ${c.id}`).replace(/\s+/g, " ").trim();
+        const resumo = (c.summary || "").replace(/<[^>]*>/g, "").trim().slice(0, 200);
+        const bimMatch = (nome + " " + resumo).match(/(\d)[°º]\s*[Bb]imestre/) || (nome + " " + resumo).match(/[Bb]imestre\s*(\d)/);
+        const bimestre = bimMatch ? `${bimMatch[1]}°` : "";
+        return { id: c.id, fullname: nome, summary: resumo, atividades: null, bimestre };
+      }).filter(c => c.id > 1);
     }
 
     let lista = typeof cursosRaw === "string" ? JSON.parse(cursosRaw) : cursosRaw;
     if (!Array.isArray(lista)) lista = lista?.courses || [];
 
-    return lista.map(extrairCursoInfos).filter(c => c.id > 1);
+    return lista.map(c => {
+      const nome = (c.fullname || c.shortname || `Curso ${c.id}`).replace(/\s+/g, " ").trim();
+      const resumo = (c.summary || "").replace(/<[^>]*>/g, "").trim().slice(0, 200);
+      const bimMatch = (nome + " " + resumo).match(/(\d)[°º]\s*[Bb]imestre/) || (nome + " " + resumo).match(/[Bb]imestre\s*(\d)/);
+      const bimestre = bimMatch ? `${bimMatch[1]}°` : "";
+      return { id: c.id, fullname: nome, summary: resumo, atividades: null, bimestre };
+    }).filter(c => c.id > 1);
   } catch (e) {
     return [];
   }
@@ -643,8 +518,8 @@ module.exports = (client) => {
     if (!secoes.length) throw new Error("Nenhuma aula encontrada neste curso");
 
     function detectarBimestreSecao(titulo) {
-      const m = titulo.match(/(0?[1-9])[°º]?\s*[-–—]?\s*[Bb]imestre/i) || titulo.match(/[Bb]imestre\s*[-–—]?\s*(0?[1-9])[°º]?/i) || titulo.match(/B(\d)/i);
-      return m ? `${parseInt(m[1])}° Bimestre` : "";
+      const m = titulo.match(/(\d)[°º]\s*[Bb]imestre/) || titulo.match(/[Bb]imestre\s*(\d)/) || titulo.match(/B(\d)/i);
+      return m ? `${m[1]}° Bimestre` : "";
     }
 
     function contarAtividades(secao) {
@@ -853,14 +728,14 @@ module.exports = (client) => {
         components: [],
       });
 
-      enqueueTask(userId, interaction, async () => {
+      try {
         const { sesskey, moodleCookies, nome, moodleUserId } = await moodleLogin(conta.ra, conta.dg, conta.senha);
         const cursos = await buscarCursosDoUsuario(sesskey, moodleCookies, moodleUserId);
         const contaAtualizada = { ...conta, sesskey, moodleCookies, nome: nome || conta.nome, moodleUserId, cursos, loginAt: Date.now() };
         salvarConta(userId, contaAtualizada);
         setSessaoAtiva(userId, contaAtualizada);
         await mostrarCursos(interaction, contaAtualizada);
-      }, "Login de Conta Salva").catch(async (err) => {
+      } catch (err) {
         await interaction.editReply({
           embeds: [new EmbedBuilder().setColor(0xe74c3c).setTitle("❌ Falha no acesso").setDescription(
             err.message.includes("incorretos") || err.message.includes("senha")
@@ -869,7 +744,7 @@ module.exports = (client) => {
           )],
           components: [],
         });
-      });
+      }
       return;
     }
 
@@ -883,14 +758,14 @@ module.exports = (client) => {
         embeds: [new EmbedBuilder().setColor(0x5865f2).setTitle("⏳ Autenticando...").setDescription("🔄 Abrindo Sala do Futuro...").setFooter({ text: "Expansão Noturno • Seduc-SP" })],
       });
 
-      enqueueTask(interaction.user.id, interaction, async () => {
+      try {
         const { sesskey, moodleCookies, nome, moodleUserId } = await moodleLogin(ra, dg, senha);
         const cursos = await buscarCursosDoUsuario(sesskey, moodleCookies, moodleUserId);
         const conta = { ra, dg, senha, sesskey, moodleCookies, nome: nome || `${ra}-${dg}`, moodleUserId, cursos, loginAt: Date.now() };
         salvarConta(interaction.user.id, conta);
         setSessaoAtiva(interaction.user.id, conta);
         await mostrarCursos(interaction, conta);
-      }, "Autenticação de Nova Conta").catch(async (err) => {
+      } catch (err) {
         await interaction.editReply({
           embeds: [new EmbedBuilder().setColor(0xe74c3c).setTitle("❌ Falha no acesso").setDescription(
             err.message.includes("incorretos") || err.message.includes("senha")
@@ -898,7 +773,7 @@ module.exports = (client) => {
               : `Erro inesperado: \`${err.message}\``
           )],
         });
-      });
+      }
       return;
     }
 
@@ -968,48 +843,41 @@ module.exports = (client) => {
         components: [],
       });
 
-      enqueueTask(userId, interaction, async () => {
-        await rodarAtividadesSecao(sessao, itens, async ({ index, total, nome, status, concluidos }) => {
-          const icons = { abrindo: "🔄", ok: "✅", erro: "⚠️" };
-          const colors = { abrindo: 0x5865f2, ok: 0x2ecc71, erro: 0xe67e22 };
-          const desc = status === "ok"
-            ? `✅ **${nome}**\n\n${barraProgresso(concluidos, total)}`
-            : `${icons[status]} **${nome}**\n\n${barraProgresso(concluidos, total)}`;
+      rodarAtividadesSecao(sessao, itens, async ({ index, total, nome, status, concluidos }) => {
+        const icons = { abrindo: "🔄", ok: "✅", erro: "⚠️" };
+        const colors = { abrindo: 0x5865f2, ok: 0x2ecc71, erro: 0xe67e22 };
+        const desc = status === "ok"
+          ? `✅ **${nome}**\n\n${barraProgresso(concluidos, total)}`
+          : `${icons[status]} **${nome}**\n\n${barraProgresso(concluidos, total)}`;
 
-          try {
-            await interaction.editReply({
-              embeds: [new EmbedBuilder()
-                .setColor(colors[status] || 0x5865f2)
-                .setTitle(`📖 ${secaoNome}`)
-                .setDescription(desc)
-                .setFooter({ text: `${curso?.nome || ""} • Expansão Noturno` })
-              ],
-              components: [],
-            });
-          } catch (_) {}
-        }).then(async ({ concluidos, total }) => {
-          const botoesRow = new ActionRowBuilder().addComponents(
-            new ButtonBuilder().setCustomId(`sf_voltar_secoes_${courseId}`).setLabel("📖 Outras aulas").setStyle(ButtonStyle.Secondary),
-            new ButtonBuilder().setCustomId("voltar_cursos").setLabel("📚 Outros cursos").setStyle(ButtonStyle.Secondary),
-          );
-          try {
-            await interaction.editReply({
-              embeds: [new EmbedBuilder()
-                .setColor(concluidos === total ? 0x2ecc71 : 0xe67e22)
-                .setTitle(`${concluidos === total ? "🏁" : "⚠️"} ${secaoNome} — Concluída`)
-                .setDescription(`**${concluidos}/${total}** atividades executadas com sucesso.`)
-                .setFooter({ text: `${curso?.nome || ""} • Expansão Noturno` })
-              ],
-              components: [botoesRow],
-            });
-          } catch (_) {}
-        });
-      }, `Executar Aulas (${secaoNome})`).catch(async (err) => {
-        await interaction.editReply({
-          embeds: [new EmbedBuilder().setColor(0xe74c3c).setTitle("❌ Erro").setDescription(`Erro na execução: \`${err.message}\``)],
-          components: [],
-        });
-      });
+        try {
+          await interaction.editReply({
+            embeds: [new EmbedBuilder()
+              .setColor(colors[status] || 0x5865f2)
+              .setTitle(`📖 ${secaoNome}`)
+              .setDescription(desc)
+              .setFooter({ text: `${curso?.nome || ""} • Expansão Noturno` })
+            ],
+            components: [],
+          });
+        } catch (_) {}
+      }).then(async ({ concluidos, total }) => {
+        const botoesRow = new ActionRowBuilder().addComponents(
+          new ButtonBuilder().setCustomId(`sf_voltar_secoes_${courseId}`).setLabel("📖 Outras aulas").setStyle(ButtonStyle.Secondary),
+          new ButtonBuilder().setCustomId("voltar_cursos").setLabel("📚 Outros cursos").setStyle(ButtonStyle.Secondary),
+        );
+        try {
+          await interaction.editReply({
+            embeds: [new EmbedBuilder()
+              .setColor(concluidos === total ? 0x2ecc71 : 0xe67e22)
+              .setTitle(`${concluidos === total ? "🏁" : "⚠️"} ${secaoNome} — Concluída`)
+              .setDescription(`**${concluidos}/${total}** atividades executadas com sucesso.`)
+              .setFooter({ text: `${curso?.nome || ""} • Expansão Noturno` })
+            ],
+            components: [botoesRow],
+          });
+        } catch (_) {}
+      }).catch(() => {});
 
       return;
     }
