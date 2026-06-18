@@ -1,0 +1,224 @@
+{
+  "1372615579407618209": {
+    "sessaoAtiva": {
+      "ra": "000111074679",
+      "dg": "9",
+      "senha": "Av05112008#",
+      "sesskey": "mgeflRZUJf",
+      "moodleCookies": [
+        "MoodleSession=vuml48hl4bgq6g9k303ojctdo2",
+        "_ga=GA1.1.1542022609.1781728767",
+        "rxVisitor=1781728764848B2HLBIBMA97S7LIOJPC8FNH4BDKUKRPU",
+        "dtCookie=v_4_srv_-2D4468_sn_D56F29SC1NU1V1SOCU3A76FI1PIFH8G5",
+        "_clck=1kriztq%5E2%5Eg6z%5E0%5E2359",
+        "sf_sid=f2b1fb85-1c65-4712-8f38-145b1886311e",
+        "dtSad991g0ha=-",
+        "_ga_EBFJLFC85E=GS2.1.s1781728766$o1$g1$t1781728791$j35$l0$h0",
+        "rxvt=1781730594203|1781728764849",
+        "dtPC=-4468$328782766_375h17vFFGAKMRPDFKINDBISKGSGRIUMBKMSBRI-0e0",
+        "_clsk=qcyubo%5E1781728795309%5E5%5E0%5Et.clarity.ms%2Fcollect",
+        "_ga_YYS6L884MZ=GS2.1.s1781728797$o1$g0$t1781728797$j60$l0$h0"
+      ],
+      "nome": "000111074679-9",
+      "loginAt": 1781728799769,
+      "cursos": [
+        {
+          "id": 204,
+          "fullname": "Aprofundamento em Biologia",
+          "summary": "",
+          "atividades": null,
+          "bimestre": ""
+        },
+        {
+          "id": 194,
+          "fullname": "Aprofundamento em Biologia",
+          "summary": "",
+          "atividades": null,
+          "bimestre": ""
+        },
+        {
+          "id": 184,
+          "fullname": "Aprofundamento em Biologia",
+          "summary": "Aprofunde saberes em Citologia, Fisiologia e Biotecnologia com foco em exames nacionais.",
+          "atividades": null,
+          "bimestre": ""
+        },
+        {
+          "id": 187,
+          "fullname": "Aprofundamento em Química",
+          "summary": "Aprofunde conhecimentos em Química com foco em vestibulares, ciência e inovação.",
+          "atividades": null,
+          "bimestre": ""
+        },
+        {
+          "id": 207,
+          "fullname": "Aprofundamento em Química",
+          "summary": "",
+          "atividades": null,
+          "bimestre": ""
+        },
+        {
+          "id": 197,
+          "fullname": "Aprofundamento em Química",
+          "summary": "",
+          "atividades": null,
+          "bimestre": ""
+        },
+        {
+          "id": 200,
+          "fullname": "Língua Inglesa - Speak",
+          "summary": "",
+          "atividades": null,
+          "bimestre": ""
+        },
+        {
+          "id": 201,
+          "fullname": "Programação - Alura",
+          "summary": "",
+          "atividades": null,
+          "bimestre": ""
+        },
+        {
+          "id": 202,
+          "fullname": "Projeto de Empreendedorismo",
+          "summary": "",
+          "atividades": null,
+          "bimestre": ""
+        },
+        {
+          "id": 213,
+          "fullname": "Projeto de vida",
+          "summary": "",
+          "atividades": null,
+          "bimestre": ""
+        },
+        {
+          "id": 203,
+          "fullname": "Projeto de vida",
+          "summary": "",
+          "atividades": null,
+          "bimestre": ""
+        },
+        {
+          "id": 192,
+          "fullname": "Projeto de vida",
+          "summary": "Reforce seu protagonismo conectando autoconhecimento e carreira ao futuro profissional.",
+          "atividades": null,
+          "bimestre": ""
+        }
+      ],
+      "moodleUserId": null
+    },
+    "contas": [
+      {
+        "ra": "000111074679",
+        "dg": "9",
+        "senha": "b40404f93141d1dd4c2efda9:e54bc78cc93145db6519f38024097f5b:2df1ba11f8d5bb41ae41a0",
+        "sesskey": "mgeflRZUJf",
+        "moodleCookies": [
+          "MoodleSession=vuml48hl4bgq6g9k303ojctdo2",
+          "_ga=GA1.1.1542022609.1781728767",
+          "rxVisitor=1781728764848B2HLBIBMA97S7LIOJPC8FNH4BDKUKRPU",
+          "dtCookie=v_4_srv_-2D4468_sn_D56F29SC1NU1V1SOCU3A76FI1PIFH8G5",
+          "_clck=1kriztq%5E2%5Eg6z%5E0%5E2359",
+          "sf_sid=f2b1fb85-1c65-4712-8f38-145b1886311e",
+          "dtSad991g0ha=-",
+          "_ga_EBFJLFC85E=GS2.1.s1781728766$o1$g1$t1781728791$j35$l0$h0",
+          "rxvt=1781730594203|1781728764849",
+          "dtPC=-4468$328782766_375h17vFFGAKMRPDFKINDBISKGSGRIUMBKMSBRI-0e0",
+          "_clsk=qcyubo%5E1781728795309%5E5%5E0%5Et.clarity.ms%2Fcollect",
+          "_ga_YYS6L884MZ=GS2.1.s1781728797$o1$g0$t1781728797$j60$l0$h0"
+        ],
+        "nome": "000111074679-9",
+        "loginAt": 1781728799769,
+        "cursos": [
+          {
+            "id": 204,
+            "fullname": "Aprofundamento em Biologia",
+            "summary": "",
+            "atividades": null,
+            "bimestre": ""
+          },
+          {
+            "id": 194,
+            "fullname": "Aprofundamento em Biologia",
+            "summary": "",
+            "atividades": null,
+            "bimestre": ""
+          },
+          {
+            "id": 184,
+            "fullname": "Aprofundamento em Biologia",
+            "summary": "Aprofunde saberes em Citologia, Fisiologia e Biotecnologia com foco em exames nacionais.",
+            "atividades": null,
+            "bimestre": ""
+          },
+          {
+            "id": 187,
+            "fullname": "Aprofundamento em Química",
+            "summary": "Aprofunde conhecimentos em Química com foco em vestibulares, ciência e inovação.",
+            "atividades": null,
+            "bimestre": ""
+          },
+          {
+            "id": 207,
+            "fullname": "Aprofundamento em Química",
+            "summary": "",
+            "atividades": null,
+            "bimestre": ""
+          },
+          {
+            "id": 197,
+            "fullname": "Aprofundamento em Química",
+            "summary": "",
+            "atividades": null,
+            "bimestre": ""
+          },
+          {
+            "id": 200,
+            "fullname": "Língua Inglesa - Speak",
+            "summary": "",
+            "atividades": null,
+            "bimestre": ""
+          },
+          {
+            "id": 201,
+            "fullname": "Programação - Alura",
+            "summary": "",
+            "atividades": null,
+            "bimestre": ""
+          },
+          {
+            "id": 202,
+            "fullname": "Projeto de Empreendedorismo",
+            "summary": "",
+            "atividades": null,
+            "bimestre": ""
+          },
+          {
+            "id": 213,
+            "fullname": "Projeto de vida",
+            "summary": "",
+            "atividades": null,
+            "bimestre": ""
+          },
+          {
+            "id": 203,
+            "fullname": "Projeto de vida",
+            "summary": "",
+            "atividades": null,
+            "bimestre": ""
+          },
+          {
+            "id": 192,
+            "fullname": "Projeto de vida",
+            "summary": "Reforce seu protagonismo conectando autoconhecimento e carreira ao futuro profissional.",
+            "atividades": null,
+            "bimestre": ""
+          }
+        ],
+        "moodleUserId": null
+      }
+    ]
+  }
+}
