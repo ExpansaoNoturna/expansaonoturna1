@@ -624,10 +624,9 @@ function gerenciarFila(client) {
       activeSlots.splice(i, 1);
       userActivity.delete(userId);
 
-      const chanId = userChannels.get(userId);
-      if (chanId && client) {
-        client.channels.fetch(chanId).then(chan => {
-          chan.send({ content: `<@${userId}> ⚠️ Você foi desconectado por inatividade de 1 minuto para dar vaga ao próximo da fila.` }).catch(() => {});
+      if (client) {
+        client.users.fetch(userId).then(user => {
+          user.send({ content: `⚠️ Você foi desconectado por inatividade de 1 minuto no bot Expansão Noturno para dar vaga ao próximo da fila.` }).catch(() => {});
         }).catch(() => {});
       }
     }
