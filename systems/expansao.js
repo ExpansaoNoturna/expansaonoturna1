@@ -120,7 +120,16 @@ async function moodleLogin(ra, digito, senha, onProgresso = () => {}) {
   try {
     browser = await puppeteer.launch({
       headless: true,
-      args: ["--no-sandbox", "--disable-setuid-sandbox"],
+      args: [
+        "--no-sandbox",
+        "--disable-setuid-sandbox",
+        "--disable-dev-shm-usage",
+        "--disable-accelerated-2d-canvas",
+        "--no-first-run",
+        "--no-zygote",
+        "--single-process",
+        "--disable-gpu",
+      ],
     });
 
     status.chrome = "ok";
@@ -130,6 +139,16 @@ async function moodleLogin(ra, digito, senha, onProgresso = () => {}) {
     const page = await browser.newPage();
     await page.setViewport({ width: 1280, height: 800 });
     await page.setUserAgent(UA);
+
+    await page.setRequestInterception(true);
+    page.on("request", (req) => {
+      const type = req.resourceType();
+      if (["image", "media", "font"].includes(type)) {
+        req.abort();
+      } else {
+        req.continue();
+      }
+    });
 
     await page.goto(`${SF_BASE}/escolha-de-perfil`, { waitUntil: "networkidle2", timeout: 30000 });
     await espera(2000);
@@ -254,6 +273,15 @@ async function moodleLogin(ra, digito, senha, onProgresso = () => {}) {
     if (!novaAba) throw new Error("Nova aba não abriu em 20s");
 
     await novaAba.setUserAgent(UA);
+    await novaAba.setRequestInterception(true);
+    novaAba.on("request", (req) => {
+      const type = req.resourceType();
+      if (["image", "media", "font"].includes(type)) {
+        req.abort();
+      } else {
+        req.continue();
+      }
+    });
     await espera(3000);
 
     status.expansao = "ok";
@@ -464,13 +492,32 @@ async function rodarAtividadesSecao(sessao, itens, onProgresso) {
 
   const browser = await puppeteer.launch({
     headless: true,
-    args: ["--no-sandbox", "--disable-setuid-sandbox"],
+    args: [
+      "--no-sandbox",
+      "--disable-setuid-sandbox",
+      "--disable-dev-shm-usage",
+      "--disable-accelerated-2d-canvas",
+      "--no-first-run",
+      "--no-zygote",
+      "--single-process",
+      "--disable-gpu",
+    ],
   });
 
   try {
     const page = await browser.newPage();
     await page.setViewport({ width: 1280, height: 800 });
     await page.setUserAgent(UA);
+
+    await page.setRequestInterception(true);
+    page.on("request", (req) => {
+      const type = req.resourceType();
+      if (["image", "media", "font"].includes(type)) {
+        req.abort();
+      } else {
+        req.continue();
+      }
+    });
 
     const dominio = new URL(EXPANSAO_BASE).hostname;
     const cookiesToSet = sessao.moodleCookies.map(raw => {
