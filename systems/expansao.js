@@ -747,39 +747,49 @@ async function moodleLogin(ra, digito, senha, onProgresso = () => {}) {
     await espera(1500);
 
     // ── Aguarda nova aba abrir ────────────────────────────────────────────────
-    // Captura páginas APÓS o clique — pode já ter aberto
-    const todasPaginasAgora = await browser.pages();
+    // ── Captura nova aba via targetcreated (método confiável do código antigo) ──
+    // Registra o listener ANTES de clicar, para não perder o evento
+    // Mas o clique já aconteceu acima — então usamos Promise.race com polling
     let novaAba = null;
-    // Tenta identificar aba do Expansão já aberta por URL
-    for (const p of todasPaginasAgora) {
-      try {
-        const u = p.url();
-        if (u && u.includes("expansao") && u !== "about:blank") { novaAba = p; break; }
-      } catch (_) {}
-    }
-    // Se não achou por URL, faz polling normal
+
+    // Método 1: targetcreated (mais confiável — igual ao código antigo)
+    try {
+      const novaAbaTarget = await new Promise((resolve, reject) => {
+        const timer = setTimeout(() => reject(new Error("timeout")), 20000);
+        browser.once("targetcreated", t => { clearTimeout(timer); resolve(t); });
+      });
+      novaAba = await novaAbaTarget.page();
+    } catch (_) {}
+
+    // Método 2: procura aba do Expansão já aberta por URL
     if (!novaAba) {
-      novaAba = await aguardarNovaAba(browser, todasPaginasAgora, 25000);
+      const todasPaginas = await browser.pages();
+      for (const p of todasPaginas) {
+        try {
+          const u = p.url();
+          if (u && u.includes("expansao") && u !== "about:blank") { novaAba = p; break; }
+        } catch (_) {}
+      }
     }
 
+    // Método 3: polling de novas páginas
     if (!novaAba) {
-      // Fallback: tenta abrir diretamente
+      novaAba = await aguardarNovaAba(browser, await browser.pages(), 20000);
+    }
+
+    // Método 4: abre diretamente via SSO
+    if (!novaAba) {
       const novaPage = await browser.newPage();
       await novaPage.setUserAgent(UA);
       await novaPage.goto(EXPANSAO_BASE, { waitUntil: "domcontentloaded", timeout: 30000 });
-      // Usa essa página como "novaAba"
-      status.expansao = "ok";
-      status.moodle = "loading";
-      onProgresso(status);
-      // continua com novaPage no lugar de novaAba
-      return await finalizarLoginMoodle(novaPage, browser, nome, status, onProgresso);
+      novaAba = novaPage;
     }
 
     await novaAba.setUserAgent(UA);
 
     // Aguarda a aba sair de about:blank
-    await aguardarAbaCarregar(novaAba, 25000);
-    await espera(2000);
+    await aguardarAbaCarregar(novaAba, 20000);
+    await espera(1500);
 
     status.expansao = "ok";
     status.moodle = "loading";
@@ -802,8 +812,14 @@ async function moodleLogin(ra, digito, senha, onProgresso = () => {}) {
 // Finaliza o login no Moodle após a aba abrir
 // ─────────────────────────────────────────────────────────────────────────────
 async function finalizarLoginMoodle(novaAba, browser, nome, status, onProgresso) {
-  // Aguarda o Moodle carregar com múltiplas estratégias
-  const metodoMoodle = await aguardarMoodleCarregar(novaAba, 90000);
+  // Aguarda sesskey via waitForFunction (método confiável do código antigo)
+  // com fallback para as estratégias múltiplas
+  try {
+    await novaAba.waitForFunction(() => window.M?.cfg?.sesskey, { timeout: 45000 });
+  } catch (_) {
+    // Fallback: estratégias múltiplas
+    await aguardarMoodleCarregar(novaAba, 45000);
+  }
 
   // Extrai sesskey com fallbacks
   const sesskey = await extrairSesskey(novaAba);
