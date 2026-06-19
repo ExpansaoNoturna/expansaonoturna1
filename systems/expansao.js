@@ -695,73 +695,123 @@ async function moodleLogin(ra, digito, senha, onProgresso = () => {}) {
     await page.screenshot({ path: path.join(DATA_DIR, "debug_apos_dropdown.png"), fullPage: true }).catch(() => {});
 
     // ── PASSO 2: Aguarda o card "Expansão Noturno" aparecer ──────────────────
-    await aguardarCardExpansao(page, 20000);
+    // Usa o mesmo waitForFunction do código antigo que funcionava
+    await page.waitForFunction(() => {
+      const all = [...document.querySelectorAll('*')];
+      return all.some(el =>
+        el.childNodes.length === 1 &&
+        el.childNodes[0]?.nodeType === Node.TEXT_NODE &&
+        el.textContent.includes("Expansão Noturno")
+      );
+    }, { timeout: 25000 }).catch(async () => {
+      // Fallback: aguarda qualquer card MUI ou texto com "expansão"
+      await page.waitForFunction(() => {
+        const all = [...document.querySelectorAll('*')];
+        return all.some(el => el.textContent.toUpperCase().includes("EXPANS") && el.children.length === 0);
+      }, { timeout: 10000 }).catch(() => {});
+    });
+
     await espera(1000);
     await page.evaluate(() => window.scrollTo(0, document.body.scrollHeight));
     await espera(800);
+
+    // Dump dos textos visíveis para debug
+    const textosVisiveis = await page.evaluate(() => {
+      return [...document.querySelectorAll('h5, h4, h3, p, span, div')]
+        .map(el => el.textContent.trim())
+        .filter(t => t.length > 3 && t.length < 60)
+        .slice(0, 30);
+    }).catch(() => []);
+    console.log("📋 Textos visíveis na página:", textosVisiveis);
 
     status.plataforma = "ok";
     status.expansao = "loading";
     onProgresso(status);
 
-    // ── PASSO 3: Clica no card "Expansão Noturno" ────────────────────────────
-    let clicouCardDireto = await clicarCardExpansao(page);
+    // ── PASSO 3: Registra targetcreated ANTES de clicar (crítico!) ───────────
+    let resolveNovaAba, rejectNovaAba;
+    const promiseNovaAba = new Promise((res, rej) => {
+      resolveNovaAba = res;
+      rejectNovaAba = rej;
+    });
+    const timerNovaAba = setTimeout(() => rejectNovaAba(new Error("timeout")), 25000);
+    browser.once("targetcreated", t => { clearTimeout(timerNovaAba); resolveNovaAba(t); });
 
-    // ── Fallback: procura link direto para expansao na página ────────────────
-    if (!clicouCardDireto) {
-      const linkExpansao = await page.evaluate(() => {
-        const links = [...document.querySelectorAll('a')];
-        const link = links.find(a =>
-          (a.href || "").toLowerCase().includes("expansao") ||
-          (a.textContent || "").toUpperCase().includes("EXPANS")
-        );
-        return link ? link.href : null;
-      });
-      if (linkExpansao) {
-        await page.goto(linkExpansao, { waitUntil: "domcontentloaded", timeout: 20000 });
-        await espera(2000);
-        clicouCardDireto = "link-direto";
-      }
-    }
+    // ── PASSO 4: Clica no card usando método do código antigo (subir DOM) ────
+    const clicouCard = await page.evaluate(() => {
+      const all = [...document.querySelectorAll('*')];
 
-    // ── Último recurso: abre o Expansão diretamente via SSO ──────────────────
-    if (!clicouCardDireto) {
-      const novaPageDireta = await browser.newPage();
-      await novaPageDireta.setUserAgent(UA);
-      try {
-        await novaPageDireta.goto(EXPANSAO_BASE, { waitUntil: "domcontentloaded", timeout: 30000 });
-        await espera(3000);
-        const urlAtual = novaPageDireta.url();
-        if (urlAtual && !urlAtual.includes("login") && urlAtual.includes("expansao")) {
-          status.plataforma = "ok";
-          status.expansao = "ok";
-          status.moodle = "loading";
-          onProgresso(status);
-          return await finalizarLoginMoodle(novaPageDireta, browser, nome, status, onProgresso);
+      // Método 1: texto exato "Expansão Noturno" — sobe na árvore até clicável
+      const textNode = all.find(el =>
+        el.childNodes.length === 1 &&
+        el.childNodes[0]?.nodeType === Node.TEXT_NODE &&
+        el.textContent.trim() === "Expansão Noturno"
+      );
+      if (textNode) {
+        let el = textNode;
+        for (let i = 0; i < 12; i++) {
+          if (!el) break;
+          const tag = el.tagName;
+          const style = window.getComputedStyle(el);
+          if (tag === 'A' || tag === 'BUTTON' || style.cursor === 'pointer') {
+            el.click(); return "text-exato-cursor";
+          }
+          el = el.parentElement;
         }
-      } catch (_) {}
-      await novaPageDireta.close().catch(() => {});
-      throw new Error("Card 'Expansão Noturno' não encontrado. A turma pode não ter acesso à plataforma.");
-    }
+        textNode.click();
+        return "text-exato-fallback";
+      }
 
-    await espera(1500);
+      // Método 2: contém "Expansão Noturno" (texto parcial)
+      const parcial = all.find(el =>
+        el.children.length === 0 &&
+        el.textContent.trim().includes("Expansão Noturno")
+      );
+      if (parcial) {
+        const card = parcial.closest('.MuiCard-root') ||
+                     parcial.closest('button') ||
+                     parcial.closest('[role="button"]') ||
+                     parcial.parentElement;
+        (card || parcial).click();
+        return "text-parcial";
+      }
 
-    // ── Aguarda nova aba abrir ────────────────────────────────────────────────
-    // ── Captura nova aba via targetcreated (método confiável do código antigo) ──
-    // Registra o listener ANTES de clicar, para não perder o evento
-    // Mas o clique já aconteceu acima — então usamos Promise.race com polling
+      // Método 3: imagem com src/alt
+      const img = document.querySelector('img[src*="expansao"], img[alt*="Expans"], img[alt*="Noturno"]');
+      if (img) {
+        const card = img.closest('.MuiCard-root') || img.closest('button') || img.parentElement;
+        (card || img).click();
+        return "img";
+      }
+
+      // Método 4: qualquer elemento com EXPANSÃO no texto e cursor pointer
+      const qualquer = all.find(el =>
+        el.textContent.toUpperCase().includes("EXPANS") &&
+        window.getComputedStyle(el).cursor === 'pointer'
+      );
+      if (qualquer) { qualquer.click(); return "cursor-pointer"; }
+
+      return null;
+    });
+
+    console.log(`🖱️ Clique no card: ${clicouCard}`);
+
+    // ── PASSO 5: Captura a nova aba ───────────────────────────────────────────
     let novaAba = null;
 
-    // Método 1: targetcreated (mais confiável — igual ao código antigo)
-    try {
-      const novaAbaTarget = await new Promise((resolve, reject) => {
-        const timer = setTimeout(() => reject(new Error("timeout")), 20000);
-        browser.once("targetcreated", t => { clearTimeout(timer); resolve(t); });
-      });
-      novaAba = await novaAbaTarget.page();
-    } catch (_) {}
+    if (clicouCard) {
+      // Aguarda targetcreated (registrado antes do clique)
+      try {
+        const target = await promiseNovaAba;
+        novaAba = await target.page();
+      } catch (_) {}
+    } else {
+      // Cancela o listener pendente
+      clearTimeout(timerNovaAba);
+      browser.removeAllListeners("targetcreated");
+    }
 
-    // Método 2: procura aba do Expansão já aberta por URL
+    // Fallback 1: procura aba do Expansão já aberta por URL
     if (!novaAba) {
       const todasPaginas = await browser.pages();
       for (const p of todasPaginas) {
@@ -772,22 +822,26 @@ async function moodleLogin(ra, digito, senha, onProgresso = () => {}) {
       }
     }
 
-    // Método 3: polling de novas páginas
+    // Fallback 2: polling
     if (!novaAba) {
-      novaAba = await aguardarNovaAba(browser, await browser.pages(), 20000);
+      novaAba = await aguardarNovaAba(browser, await browser.pages(), 15000);
     }
 
-    // Método 4: abre diretamente via SSO
+    // Fallback 3: abre diretamente via SSO (sessão já está ativa)
     if (!novaAba) {
       const novaPage = await browser.newPage();
       await novaPage.setUserAgent(UA);
       await novaPage.goto(EXPANSAO_BASE, { waitUntil: "domcontentloaded", timeout: 30000 });
+      await espera(3000);
+      const urlDireta = novaPage.url();
+      if (urlDireta.includes("login")) {
+        await novaPage.close().catch(() => {});
+        throw new Error(`Card não clicado (${clicouCard || 'null'}) e SSO não autenticou. Textos na página: ${textosVisiveis.join(', ')}`);
+      }
       novaAba = novaPage;
     }
 
     await novaAba.setUserAgent(UA);
-
-    // Aguarda a aba sair de about:blank
     await aguardarAbaCarregar(novaAba, 20000);
     await espera(1500);
 
