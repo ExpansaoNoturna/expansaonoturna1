@@ -143,7 +143,7 @@ async function moodleLogin(ra, digito, senha, onProgresso = () => {}) {
     await page.setRequestInterception(true);
     page.on("request", (req) => {
       const type = req.resourceType();
-      if (["image", "media", "font"].includes(type)) {
+      if (["image", "media"].includes(type)) {
         req.abort();
       } else {
         req.continue();
@@ -276,7 +276,7 @@ async function moodleLogin(ra, digito, senha, onProgresso = () => {}) {
     await novaAba.setRequestInterception(true);
     novaAba.on("request", (req) => {
       const type = req.resourceType();
-      if (["image", "media", "font"].includes(type)) {
+      if (["image", "media"].includes(type)) {
         req.abort();
       } else {
         req.continue();
@@ -512,7 +512,7 @@ async function rodarAtividadesSecao(sessao, itens, onProgresso) {
     await page.setRequestInterception(true);
     page.on("request", (req) => {
       const type = req.resourceType();
-      if (["image", "media", "font"].includes(type)) {
+      if (["image", "media"].includes(type)) {
         req.abort();
       } else {
         req.continue();
