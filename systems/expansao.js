@@ -606,6 +606,7 @@ function formatarProgressoLogin(progresso) {
     else if (status === "erro") icon = "❌";
     return `${icon} ${p.label}`;
   }).join("\n");
+}
 function gerenciarFila(client) {
   const agora = Date.now();
   const limiteInatividade = 60000; // 1 minute
