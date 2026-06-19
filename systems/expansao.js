@@ -150,7 +150,7 @@ async function moodleLogin(ra, digito, senha, onProgresso = () => {}) {
       }
     });
 
-    await page.goto(`${SF_BASE}/escolha-de-perfil`, { waitUntil: "networkidle2", timeout: 30000 });
+    await page.goto(`${SF_BASE}/escolha-de-perfil`, { waitUntil: "domcontentloaded", timeout: 30000 });
     await espera(2000);
 
     status.sala = "ok";
@@ -206,7 +206,7 @@ async function moodleLogin(ra, digito, senha, onProgresso = () => {}) {
     });
     if (!clicouAcessar) throw new Error("Botão Acessar não encontrado");
 
-    await page.waitForNavigation({ waitUntil: "networkidle2", timeout: 20000 });
+    await page.waitForNavigation({ waitUntil: "domcontentloaded", timeout: 20000 });
     await espera(2000);
 
     if (page.url().includes("login") || page.url().includes("escolha")) {
@@ -222,7 +222,7 @@ async function moodleLogin(ra, digito, senha, onProgresso = () => {}) {
     status.plataforma = "loading";
     onProgresso(status);
 
-    await page.goto(`${SF_BASE}/plataformas`, { waitUntil: "networkidle2", timeout: 30000 });
+    await page.goto(`${SF_BASE}/plataformas`, { waitUntil: "domcontentloaded", timeout: 30000 });
     await espera(3000);
 
     await page.waitForSelector('[class*="MuiSelect-select"]', { timeout: 15000 });
@@ -536,7 +536,7 @@ async function rodarAtividadesSecao(sessao, itens, onProgresso) {
       await onProgresso({ index: i, total: itensComUrl.length, nome, status: "abrindo", concluidos });
 
       try {
-        await page.goto(cm.url, { waitUntil: "networkidle2", timeout: 30000 });
+        await page.goto(cm.url, { waitUntil: "domcontentloaded", timeout: 30000 });
         await espera(1200);
 
         await page.evaluate(async () => {
