@@ -679,7 +679,7 @@ function gerenciarFila(client) {
     }
   }
 
-  while (activeSlots.length < 2 && queue.length > 0) {
+  while (activeSlots.length < 1 && queue.length > 0) {
     const proximoUserId = queue.shift();
     activeSlots.push(proximoUserId);
     userActivity.set(proximoUserId, Date.now());
@@ -735,9 +735,16 @@ module.exports = (client) => {
       .setPlaceholder("📚 Selecione um curso...")
       .addOptions(montarOpcoesSelect(sessao));
 
+    const sairBotao = new ActionRowBuilder().addComponents(
+      new ButtonBuilder().setCustomId("sf_sair_fila").setLabel("🚪 Sair do Bot").setStyle(ButtonStyle.Danger)
+    );
+
     await interaction.editReply({
       embeds: [embed],
-      components: [new ActionRowBuilder().addComponents(select)],
+      components: [
+        new ActionRowBuilder().addComponents(select),
+        sairBotao
+      ],
     });
   }
 
@@ -799,7 +806,11 @@ module.exports = (client) => {
       new ButtonBuilder()
         .setCustomId("voltar_cursos")
         .setLabel("📚 Voltar aos cursos")
-        .setStyle(ButtonStyle.Secondary)
+        .setStyle(ButtonStyle.Secondary),
+      new ButtonBuilder()
+        .setCustomId("sf_sair_fila")
+        .setLabel("🚪 Sair do Bot")
+        .setStyle(ButtonStyle.Danger)
     );
 
     await interaction.editReply({
@@ -895,7 +906,7 @@ module.exports = (client) => {
       gerenciarFila(client);
 
       if (!activeSlots.includes(userId)) {
-        if (activeSlots.length < 2) {
+        if (activeSlots.length < 1) {
           activeSlots.push(userId);
           userActivity.set(userId, Date.now());
         } else {
@@ -903,7 +914,7 @@ module.exports = (client) => {
             queue.push(userId);
           }
           const posicao = queue.indexOf(userId) + 1;
-          await message.channel.send({ content: `<@${userId}> ❌ O bot está cheio (limite de 2 usuários simultâneos). Você foi adicionado à fila.\nSua posição na fila: **${posicao}**` }).catch(() => {});
+          await message.channel.send({ content: `<@${userId}> ❌ O bot está cheio (limite de 1 usuário simultâneo). Você foi adicionado à fila.\nSua posição na fila: **${posicao}**` }).catch(() => {});
           return;
         }
       }
@@ -920,7 +931,7 @@ module.exports = (client) => {
     gerenciarFila(client);
 
     if (!activeSlots.includes(userId)) {
-      if (activeSlots.length < 2) {
+      if (activeSlots.length < 1) {
         activeSlots.push(userId);
         userActivity.set(userId, Date.now());
       } else {
@@ -931,13 +942,13 @@ module.exports = (client) => {
         try {
           await interaction.reply({
             flags: 64,
-            content: `❌ O bot está cheio (limite de 2 usuários simultâneos). Você está na fila.\nSua posição na fila: **${posicao}**`
+            content: `❌ O bot está cheio (limite de 1 usuário simultâneo). Você está na fila.\nSua posição na fila: **${posicao}**`
           });
         } catch (_) {
           try {
             await interaction.followUp({
               flags: 64,
-              content: `❌ O bot está cheio (limite de 2 usuários simultâneos). Você está na fila.\nSua posição na fila: **${posicao}**`
+              content: `❌ O bot está cheio (limite de 1 usuário simultâneo). Você está na fila.\nSua posição na fila: **${posicao}**`
             });
           } catch (__) {}
         }
@@ -946,6 +957,32 @@ module.exports = (client) => {
     }
 
     userActivity.set(userId, Date.now());
+
+    if (interaction.isButton() && interaction.customId === "sf_sair_fila") {
+      const idx = activeSlots.indexOf(userId);
+      if (idx >= 0) {
+        activeSlots.splice(idx, 1);
+        userActivity.delete(userId);
+      }
+      const qIdx = queue.indexOf(userId);
+      if (qIdx >= 0) {
+        queue.splice(qIdx, 1);
+      }
+      gerenciarFila(client);
+
+      try {
+        await interaction.update({
+          embeds: [new EmbedBuilder()
+            .setColor(0xe74c3c)
+            .setTitle("🚪 Sessão Encerrada")
+            .setDescription("Você saiu do bot e liberou a vaga para o próximo da fila. Até mais!")
+            .setFooter({ text: "Expansão Noturno • Seduc-SP" })
+          ],
+          components: []
+        });
+      } catch (_) {}
+      return;
+    }
 
     if (interaction.isButton() && interaction.customId === "sf_nova_conta") {
       try {
@@ -1314,9 +1351,16 @@ module.exports = (client) => {
         .setPlaceholder("📚 Selecione um curso...")
         .addOptions(montarOpcoesSelect(sessao));
 
+      const sairBotao = new ActionRowBuilder().addComponents(
+        new ButtonBuilder().setCustomId("sf_sair_fila").setLabel("🚪 Sair do Bot").setStyle(ButtonStyle.Danger)
+      );
+
       await interaction.editReply({
         embeds: [embed],
-        components: [new ActionRowBuilder().addComponents(select)],
+        components: [
+          new ActionRowBuilder().addComponents(select),
+          sairBotao
+        ],
       });
       return;
     }
