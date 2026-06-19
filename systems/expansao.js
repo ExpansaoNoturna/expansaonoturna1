@@ -626,10 +626,35 @@ function cancelarAutoAdvance(userId) {
 
 // Queue and Activity tracking variables
 const activeSlots = []; // Array of User IDs (max length 2)
-const queue = [];       // Array of User IDs waiting
+const QUEUE_FILE = path.join(DATA_DIR, "queue.json");
+
+function carregarFila() {
+  try {
+    if (!fs.existsSync(QUEUE_FILE)) return [];
+    return JSON.parse(fs.readFileSync(QUEUE_FILE, "utf-8"));
+  } catch (e) {
+    return [];
+  }
+}
+
+function salvarFila() {
+  try {
+    if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
+    fs.writeFileSync(QUEUE_FILE, JSON.stringify(queue, null, 2), "utf-8");
+  } catch (e) {}
+}
+
+const queue = carregarFila();       // Array of User IDs waiting
 const userActivity = new Map(); // userId -> timestamp
 const userBusy = new Set(); // Set of userIds who are currently running Puppeteer actions
 const userChannels = new Map(); // userId -> channelId
+
+function obterTextoFila(userId) {
+  if (queue.length === 0) return "Fila vazia.";
+  const posicao = queue.indexOf(userId) + 1;
+  const listaMencionada = queue.map((id, index) => `${index + 1}. <@${id}>`).join("\n");
+  return `📋 **Fila de Espera:**\n${listaMencionada}\n\nSua posição na fila: **${posicao}°**`;
+}
 
 function formatarProgressoLogin(progresso) {
   const passos = [
@@ -681,13 +706,30 @@ function gerenciarFila(client) {
 
   while (activeSlots.length < 1 && queue.length > 0) {
     const proximoUserId = queue.shift();
+    salvarFila();
     activeSlots.push(proximoUserId);
     userActivity.set(proximoUserId, Date.now());
 
-    const chanId = userChannels.get(proximoUserId);
-    if (chanId && client) {
-      client.channels.fetch(chanId).then(chan => {
-        chan.send({ content: `<@${proximoUserId}> 🎉 Sua vez! O bot agora está liberado para você usar.` }).catch(() => {});
+    if (client) {
+      client.users.fetch(proximoUserId).then(async (user) => {
+        const embed = new EmbedBuilder()
+          .setColor(0x5865f2)
+          .setTitle("🔐 Expansão Noturno — Sua Vez!")
+          .setDescription(`O bot está livre para você agora!\n\nAdicione uma nova conta ou selecione uma conta salva para começar.`)
+          .setFooter({ text: "Expansão Noturno • Seduc-SP" });
+
+        const botoes = new ActionRowBuilder().addComponents(
+          new ButtonBuilder()
+            .setCustomId("sf_nova_conta")
+            .setLabel("➕ Nova Conta")
+            .setStyle(ButtonStyle.Primary),
+          new ButtonBuilder()
+            .setCustomId("sf_contas_salvas")
+            .setLabel("📂 Contas Salvas")
+            .setStyle(ButtonStyle.Secondary)
+        );
+
+        await user.send({ content: `🎉 É a sua vez!`, embeds: [embed], components: [botoes] }).catch(() => {});
       }).catch(() => {});
     }
   }
@@ -912,9 +954,9 @@ module.exports = (client) => {
         } else {
           if (!queue.includes(userId)) {
             queue.push(userId);
+            salvarFila();
           }
-          const posicao = queue.indexOf(userId) + 1;
-          await message.channel.send({ content: `<@${userId}> ❌ O bot está cheio (limite de 1 usuário simultâneo). Você foi adicionado à fila.\nSua posição na fila: **${posicao}**` }).catch(() => {});
+          await message.channel.send({ content: `<@${userId}> ❌ O bot está cheio (limite de 1 usuário simultâneo).\n\n${obterTextoFila(userId)}` }).catch(() => {});
           return;
         }
       }
@@ -937,18 +979,18 @@ module.exports = (client) => {
       } else {
         if (!queue.includes(userId)) {
           queue.push(userId);
+          salvarFila();
         }
-        const posicao = queue.indexOf(userId) + 1;
         try {
           await interaction.reply({
             flags: 64,
-            content: `❌ O bot está cheio (limite de 1 usuário simultâneo). Você está na fila.\nSua posição na fila: **${posicao}**`
+            content: `❌ O bot está cheio (limite de 1 usuário simultâneo).\n\n${obterTextoFila(userId)}`
           });
         } catch (_) {
           try {
             await interaction.followUp({
               flags: 64,
-              content: `❌ O bot está cheio (limite de 1 usuário simultâneo). Você está na fila.\nSua posição na fila: **${posicao}**`
+              content: `❌ O bot está cheio (limite de 1 usuário simultâneo).\n\n${obterTextoFila(userId)}`
             });
           } catch (__) {}
         }
@@ -967,6 +1009,7 @@ module.exports = (client) => {
       const qIdx = queue.indexOf(userId);
       if (qIdx >= 0) {
         queue.splice(qIdx, 1);
+        salvarFila();
       }
       gerenciarFila(client);
 
