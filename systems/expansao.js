@@ -273,13 +273,18 @@ async function moodleLogin(ra, digito, senha, onProgresso = () => {}) {
     if (!novaAba) throw new Error("Nova aba não abriu em 20s");
 
     await novaAba.setUserAgent(UA);
-    await espera(3000);
+    // Espera a aba sair de about:blank
+    for (let i = 0; i < 20; i++) {
+      if (novaAba.url() && novaAba.url() !== "about:blank") break;
+      await espera(1000);
+    }
+    await espera(2000);
 
     status.expansao = "ok";
     status.moodle = "loading";
     onProgresso(status);
 
-    await novaAba.waitForFunction(() => window.M?.cfg?.sesskey, { timeout: 30000 });
+    await novaAba.waitForFunction(() => window.M?.cfg?.sesskey, { timeout: 60000 });
 
     const sesskey = await novaAba.evaluate(() => window.M.cfg.sesskey);
     const moodleUserId = await novaAba.evaluate(() => {
