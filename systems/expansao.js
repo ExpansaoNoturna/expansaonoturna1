@@ -140,17 +140,7 @@ async function moodleLogin(ra, digito, senha, onProgresso = () => {}) {
     await page.setViewport({ width: 1280, height: 800 });
     await page.setUserAgent(UA);
 
-    await page.setRequestInterception(true);
-    page.on("request", (req) => {
-      const type = req.resourceType();
-      if (["image", "media"].includes(type)) {
-        req.abort();
-      } else {
-        req.continue();
-      }
-    });
-
-    await page.goto(`${SF_BASE}/escolha-de-perfil`, { waitUntil: "domcontentloaded", timeout: 30000 });
+    await page.goto(`${SF_BASE}/escolha-de-perfil`, { waitUntil: "networkidle2", timeout: 30000 });
     await espera(2000);
 
     status.sala = "ok";
@@ -206,7 +196,7 @@ async function moodleLogin(ra, digito, senha, onProgresso = () => {}) {
     });
     if (!clicouAcessar) throw new Error("Botão Acessar não encontrado");
 
-    await page.waitForNavigation({ waitUntil: "domcontentloaded", timeout: 20000 });
+    await page.waitForNavigation({ waitUntil: "networkidle2", timeout: 20000 });
     await espera(2000);
 
     if (page.url().includes("login") || page.url().includes("escolha")) {
@@ -222,7 +212,7 @@ async function moodleLogin(ra, digito, senha, onProgresso = () => {}) {
     status.plataforma = "loading";
     onProgresso(status);
 
-    await page.goto(`${SF_BASE}/plataformas`, { waitUntil: "domcontentloaded", timeout: 30000 });
+    await page.goto(`${SF_BASE}/plataformas`, { waitUntil: "networkidle2", timeout: 30000 });
     await espera(3000);
 
     await page.waitForSelector('[class*="MuiSelect-select"]', { timeout: 15000 });
@@ -239,7 +229,9 @@ async function moodleLogin(ra, digito, senha, onProgresso = () => {}) {
     if (!selecionou) throw new Error("Opção 'EXPANSÃO' não encontrada no dropdown");
 
     await page.waitForFunction(() => {
-      return [...document.querySelectorAll('h5.MuiTypography-h5')].some(el => el.textContent.trim() === "Expansão Noturno");
+      const temTexto = [...document.querySelectorAll('h5.MuiTypography-h5')].some(el => el.textContent.trim() === "Expansão Noturno");
+      const temImagem = document.querySelector('img[src*="mairaeliasman3315708-sp"]') || document.querySelector('img[src*="xR5olQ4KQUkyIA4sAYOucKMX8d3GYu.png"]');
+      return temTexto || temImagem;
     }, { timeout: 35000 });
     await espera(1500);
     await page.evaluate(() => window.scrollTo(0, document.body.scrollHeight));
@@ -250,6 +242,14 @@ async function moodleLogin(ra, digito, senha, onProgresso = () => {}) {
     onProgresso(status);
 
     const clicouCard = await page.evaluate(() => {
+      // Busca pela imagem única da Expansão Noturno
+      const img = document.querySelector('img[src*="mairaeliasman3315708-sp"]') || document.querySelector('img[src*="xR5olQ4KQUkyIA4sAYOucKMX8d3GYu.png"]');
+      if (img) {
+        const card = img.closest('.MuiCard-root') || img.closest('button') || img.closest('div[role="button"]') || img;
+        card.click();
+        return true;
+      }
+      // Fallback: Busca pelo texto
       const h5 = [...document.querySelectorAll('h5.MuiTypography-h5')].find(el => el.textContent.trim() === "Expansão Noturno");
       if (!h5) return false;
       const card = h5.closest('.MuiCard-root');
@@ -273,15 +273,6 @@ async function moodleLogin(ra, digito, senha, onProgresso = () => {}) {
     if (!novaAba) throw new Error("Nova aba não abriu em 20s");
 
     await novaAba.setUserAgent(UA);
-    await novaAba.setRequestInterception(true);
-    novaAba.on("request", (req) => {
-      const type = req.resourceType();
-      if (["image", "media"].includes(type)) {
-        req.abort();
-      } else {
-        req.continue();
-      }
-    });
     await espera(3000);
 
     status.expansao = "ok";
