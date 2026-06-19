@@ -243,7 +243,16 @@ async function moodleLogin(ra, digito, senha) {
         const idMatch = href.match(/id=(\d+)/);
         if (!idMatch) return;
         const id = parseInt(idMatch[1]);
-        const fullname = linkEl.textContent.trim();
+        let fullname = "";
+        const multilineEl = linkEl.querySelector('.multiline');
+        if (multilineEl) {
+          fullname = multilineEl.textContent.trim();
+        } else {
+          const clone = linkEl.cloneNode(true);
+          const srOnlyEl = clone.querySelector('.sr-only');
+          if (srOnlyEl) srOnlyEl.remove();
+          fullname = clone.textContent.trim();
+        }
         
         const statsSpans = [...card.querySelectorAll('.course-stats')];
         let bimestre = "";
