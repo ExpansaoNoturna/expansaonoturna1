@@ -203,14 +203,14 @@ async function moodleLogin(ra, digito, senha, onProgresso = () => {}) {
     status.plataforma = "loading";
     onProgresso(status);
 
-    await page.goto(`${SF_BASE}/plataformas`, { waitUntil: "networkidle2", timeout: 20000 });
+    await page.goto(`${SF_BASE}/plataformas`, { waitUntil: "networkidle2", timeout: 30000 });
     await espera(3000);
 
-    await page.waitForSelector('[class*="MuiSelect-select"]', { timeout: 10000 });
-    await espera(1000);
+    await page.waitForSelector('[class*="MuiSelect-select"]', { timeout: 15000 });
+    await espera(1500);
     await page.click('[class*="MuiSelect-select"]');
-    await page.waitForSelector('[role="option"]', { timeout: 10000 });
-    await espera(1000);
+    await page.waitForSelector('[role="option"]', { timeout: 15000 });
+    await espera(1500);
 
     const selecionou = await page.evaluate(() => {
       const op = [...document.querySelectorAll('[role="option"]')].find(o => o.textContent.toUpperCase().includes("EXPANS"));
@@ -221,10 +221,10 @@ async function moodleLogin(ra, digito, senha, onProgresso = () => {}) {
 
     await page.waitForFunction(() => {
       return [...document.querySelectorAll('h5.MuiTypography-h5')].some(el => el.textContent.trim() === "Expansão Noturno");
-    }, { timeout: 15000 });
-    await espera(1000);
+    }, { timeout: 35000 });
+    await espera(1500);
     await page.evaluate(() => window.scrollTo(0, document.body.scrollHeight));
-    await espera(500);
+    await espera(1000);
 
     status.plataforma = "ok";
     status.expansao = "loading";
