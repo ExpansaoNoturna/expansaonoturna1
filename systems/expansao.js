@@ -613,73 +613,154 @@ async function moodleLogin(ra, digito, senha, onProgresso = () => {}) {
 
     // ── Carrega Plataformas ──────────────────────────────────────────────────
     await page.goto(`${SF_BASE}/plataformas`, { waitUntil: "networkidle2", timeout: 30000 });
-    await espera(3000);
+    await espera(4000);
 
-    // Aguarda o select de plataformas com múltiplos seletores
-    const seletoresSelect = [
+    // Screenshot de debug
+    await page.screenshot({ path: path.join(DATA_DIR, "debug_plataformas.png"), fullPage: true }).catch(() => {});
+
+    // ── PASSO 1: Sempre abre o dropdown e seleciona a opção com "EXPANSÃO" ───
+    // A página pode carregar com qualquer turma selecionada (ex: "3ª D - EM EXATAS")
+    // então SEMPRE precisamos trocar para a opção que contenha "EXPANSÃO"
+
+    // Aguarda o dropdown aparecer
+    const seletoresDropdown = [
       '[class*="MuiSelect-select"]',
-      'select',
-      '[role="combobox"]',
       '[aria-haspopup="listbox"]',
+      '[role="combobox"]',
+      'select',
     ];
-    let encontrouSelect = false;
-    for (const sel of seletoresSelect) {
+    let dropdownEl = null;
+    for (const sel of seletoresDropdown) {
       try {
         await page.waitForSelector(sel, { timeout: 5000 });
-        await page.click(sel);
-        encontrouSelect = true;
+        dropdownEl = sel;
         break;
       } catch (_) {}
     }
-    if (!encontrouSelect) {
-      // Fallback: tenta clicar em qualquer dropdown presente
-      await page.evaluate(() => {
-        const possivel = document.querySelector('[role="combobox"]') ||
-          document.querySelector('[class*="Select"]') ||
-          document.querySelector('select');
-        if (possivel) possivel.click();
-      });
-    }
 
-    // Aguarda as opções aparecerem
-    try {
-      await page.waitForSelector('[role="option"]', { timeout: 15000 });
-    } catch (_) {
+    // Verifica se o dropdown atual já está na opção correta
+    const opcaoAtualTexto = await page.evaluate((sels) => {
+      for (const s of sels) {
+        const el = document.querySelector(s);
+        if (el) return el.textContent.trim().toUpperCase();
+      }
+      return "";
+    }, seletoresDropdown);
+
+    const jaEstaEmExpansao = opcaoAtualTexto.includes("EXPANS") || opcaoAtualTexto.includes("NOTURNO");
+
+    if (!jaEstaEmExpansao && dropdownEl) {
+      // Clica no dropdown para abrir
+      await page.click(dropdownEl).catch(() => {});
+      await espera(1500);
+
+      // Aguarda as opções aparecerem
+      try {
+        await page.waitForSelector('[role="option"], li[role="option"]', { timeout: 8000 });
+      } catch (_) {
+        await espera(2000);
+      }
+
+      // Clica na opção que contém "EXPANSÃO" (qualquer série)
+      const selecionou = await page.evaluate(() => {
+        const candidatos = [
+          ...document.querySelectorAll('[role="option"]'),
+          ...document.querySelectorAll('li[role="option"]'),
+          ...document.querySelectorAll('option'),
+          ...document.querySelectorAll('li'),
+        ];
+        // Prioridade 1: contém EXPANSÃO E NOTURNO
+        let op = candidatos.find(o =>
+          o.textContent.toUpperCase().includes("EXPANS") &&
+          o.textContent.toUpperCase().includes("NOTURNO")
+        );
+        // Prioridade 2: só EXPANSÃO
+        if (!op) op = candidatos.find(o => o.textContent.toUpperCase().includes("EXPANS"));
+        // Prioridade 3: NOITE (turno noturno)
+        if (!op) op = candidatos.find(o => o.textContent.toUpperCase().includes("NOITE"));
+        if (op) { op.click(); return op.textContent.trim(); }
+        return null;
+      });
+
+      if (!selecionou) {
+        // Fecha o dropdown se abriu e não achou a opção
+        await page.keyboard.press('Escape').catch(() => {});
+      }
+
+      // Aguarda a página atualizar os cards após a seleção
       await espera(3000);
     }
-    await espera(1500);
 
-    // Seleciona a opção "Expansão" com múltiplos fallbacks
-    const selecionou = await page.evaluate(() => {
-      const ops = [...document.querySelectorAll('[role="option"], option, li')];
-      const op = ops.find(o =>
-        o.textContent.toUpperCase().includes("EXPANS") ||
-        o.textContent.toUpperCase().includes("NOTURNO")
-      );
-      if (op) { op.click(); return op.textContent.trim(); }
-      return null;
-    });
-    if (!selecionou) throw new Error("Opção 'EXPANSÃO' não encontrada no dropdown");
+    // Screenshot após seleção do dropdown
+    await page.screenshot({ path: path.join(DATA_DIR, "debug_apos_dropdown.png"), fullPage: true }).catch(() => {});
 
-    // ── Aguarda o card da Expansão Noturno ───────────────────────────────────
-    const metodoCard = await aguardarCardExpansao(page, 40000);
-    await espera(1500);
-    await page.evaluate(() => window.scrollTo(0, document.body.scrollHeight));
+    // ── PASSO 2: Aguarda o card "Expansão Noturno" aparecer ──────────────────
+    await aguardarCardExpansao(page, 20000);
     await espera(1000);
+    await page.evaluate(() => window.scrollTo(0, document.body.scrollHeight));
+    await espera(800);
 
     status.plataforma = "ok";
     status.expansao = "loading";
     onProgresso(status);
 
-    // ── Clica no card da Expansão Noturno ────────────────────────────────────
-    const clicouCard = await clicarCardExpansao(page);
-    if (!clicouCard) throw new Error("Card 'Expansão Noturno' não encontrado");
+    // ── PASSO 3: Clica no card "Expansão Noturno" ────────────────────────────
+    let clicouCardDireto = await clicarCardExpansao(page);
+
+    // ── Fallback: procura link direto para expansao na página ────────────────
+    if (!clicouCardDireto) {
+      const linkExpansao = await page.evaluate(() => {
+        const links = [...document.querySelectorAll('a')];
+        const link = links.find(a =>
+          (a.href || "").toLowerCase().includes("expansao") ||
+          (a.textContent || "").toUpperCase().includes("EXPANS")
+        );
+        return link ? link.href : null;
+      });
+      if (linkExpansao) {
+        await page.goto(linkExpansao, { waitUntil: "domcontentloaded", timeout: 20000 });
+        await espera(2000);
+        clicouCardDireto = "link-direto";
+      }
+    }
+
+    // ── Último recurso: abre o Expansão diretamente via SSO ──────────────────
+    if (!clicouCardDireto) {
+      const novaPageDireta = await browser.newPage();
+      await novaPageDireta.setUserAgent(UA);
+      try {
+        await novaPageDireta.goto(EXPANSAO_BASE, { waitUntil: "domcontentloaded", timeout: 30000 });
+        await espera(3000);
+        const urlAtual = novaPageDireta.url();
+        if (urlAtual && !urlAtual.includes("login") && urlAtual.includes("expansao")) {
+          status.plataforma = "ok";
+          status.expansao = "ok";
+          status.moodle = "loading";
+          onProgresso(status);
+          return await finalizarLoginMoodle(novaPageDireta, browser, nome, status, onProgresso);
+        }
+      } catch (_) {}
+      await novaPageDireta.close().catch(() => {});
+      throw new Error("Card 'Expansão Noturno' não encontrado. A turma pode não ter acesso à plataforma.");
+    }
 
     await espera(1500);
 
     // ── Aguarda nova aba abrir ────────────────────────────────────────────────
-    const paginasAntesArr = await browser.pages();
-    const novaAba = await aguardarNovaAba(browser, paginasAntesArr, 25000);
+    // Captura páginas APÓS o clique — pode já ter aberto
+    const todasPaginasAgora = await browser.pages();
+    let novaAba = null;
+    // Tenta identificar aba do Expansão já aberta por URL
+    for (const p of todasPaginasAgora) {
+      try {
+        const u = p.url();
+        if (u && u.includes("expansao") && u !== "about:blank") { novaAba = p; break; }
+      } catch (_) {}
+    }
+    // Se não achou por URL, faz polling normal
+    if (!novaAba) {
+      novaAba = await aguardarNovaAba(browser, todasPaginasAgora, 25000);
+    }
 
     if (!novaAba) {
       // Fallback: tenta abrir diretamente
