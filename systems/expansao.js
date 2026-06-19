@@ -97,22 +97,46 @@ function setSessaoAtiva(userId, conta) {
   salvarDados(dados);
 }
 
-async function moodleLogin(ra, digito, senha) {
+async function moodleLogin(ra, digito, senha, onProgresso = () => {}) {
   const puppeteer = require("puppeteer");
   const espera = (ms) => new Promise(r => setTimeout(r, ms));
 
-  const browser = await puppeteer.launch({
-    headless: true,
-    args: ["--no-sandbox", "--disable-setuid-sandbox"],
-  });
+  const status = {
+    chrome: "loading",
+    sala: "waiting",
+    perfil: "waiting",
+    ra: "waiting",
+    senha: "waiting",
+    acessar: "waiting",
+    plataforma: "waiting",
+    expansao: "waiting",
+    moodle: "waiting",
+    cursos: "waiting"
+  };
 
+  onProgresso(status);
+
+  let browser;
   try {
+    browser = await puppeteer.launch({
+      headless: true,
+      args: ["--no-sandbox", "--disable-setuid-sandbox"],
+    });
+
+    status.chrome = "ok";
+    status.sala = "loading";
+    onProgresso(status);
+
     const page = await browser.newPage();
     await page.setViewport({ width: 1280, height: 800 });
     await page.setUserAgent(UA);
 
     await page.goto(`${SF_BASE}/escolha-de-perfil`, { waitUntil: "networkidle2", timeout: 30000 });
     await espera(2000);
+
+    status.sala = "ok";
+    status.perfil = "loading";
+    onProgresso(status);
 
     await page.waitForSelector('p.MuiTypography-root', { timeout: 10000 });
     await espera(1000);
@@ -122,6 +146,10 @@ async function moodleLogin(ra, digito, senha) {
       return false;
     });
     if (!clicouEstudante) throw new Error("Botão 'Estudante' não encontrado");
+
+    status.perfil = "ok";
+    status.ra = "loading";
+    onProgresso(status);
 
     await page.waitForSelector('#input-usuario-sed', { timeout: 15000 });
     await espera(2000);
@@ -136,10 +164,18 @@ async function moodleLogin(ra, digito, senha) {
     await page.type('[name="digito-ra"]', String(digito).trim(), { delay: 50 });
     await espera(500);
 
+    status.ra = "ok";
+    status.senha = "loading";
+    onProgresso(status);
+
     await page.click('#input-senha', { clickCount: 3 });
     await espera(300);
     await page.type('#input-senha', String(senha).trim(), { delay: 50 });
     await espera(500);
+
+    status.senha = "ok";
+    status.acessar = "loading";
+    onProgresso(status);
 
     const clicouAcessar = await page.evaluate(() => {
       let btn = [...document.querySelectorAll('button')].find(b => b.textContent.trim() === 'Acessar');
@@ -163,6 +199,10 @@ async function moodleLogin(ra, digito, senha) {
       return el ? el.textContent.trim() : null;
     }).catch(() => null);
 
+    status.acessar = "ok";
+    status.plataforma = "loading";
+    onProgresso(status);
+
     await page.goto(`${SF_BASE}/plataformas`, { waitUntil: "networkidle2", timeout: 20000 });
     await espera(3000);
 
@@ -185,6 +225,10 @@ async function moodleLogin(ra, digito, senha) {
     await espera(1000);
     await page.evaluate(() => window.scrollTo(0, document.body.scrollHeight));
     await espera(500);
+
+    status.plataforma = "ok";
+    status.expansao = "loading";
+    onProgresso(status);
 
     const clicouCard = await page.evaluate(() => {
       const h5 = [...document.querySelectorAll('h5.MuiTypography-h5')].find(el => el.textContent.trim() === "Expansão Noturno");
@@ -212,6 +256,10 @@ async function moodleLogin(ra, digito, senha) {
     await novaAba.setUserAgent(UA);
     await espera(3000);
 
+    status.expansao = "ok";
+    status.moodle = "loading";
+    onProgresso(status);
+
     await novaAba.waitForFunction(() => window.M?.cfg?.sesskey, { timeout: 30000 });
 
     const sesskey = await novaAba.evaluate(() => window.M.cfg.sesskey);
@@ -229,6 +277,10 @@ async function moodleLogin(ra, digito, senha) {
     const rawCookies = await novaAba.cookies();
     const moodleCookies = rawCookies.map(c => `${c.name}=${c.value}`);
     if (!moodleCookies.find(c => c.startsWith("MoodleSession="))) throw new Error("MoodleSession não encontrado");
+
+    status.moodle = "ok";
+    status.cursos = "loading";
+    onProgresso(status);
 
     // Espera os cards de curso carregarem na página do Moodle
     await novaAba.waitForSelector('.course-info-container', { timeout: 10000 }).catch(() => null);
@@ -282,9 +334,22 @@ async function moodleLogin(ra, digito, senha) {
       return result;
     }).catch(() => []);
 
+    status.cursos = "ok";
+    onProgresso(status);
+
     return { sesskey, moodleCookies, nome, moodleUserId, cursosScraped };
+  } catch (err) {
+    for (const key of Object.keys(status)) {
+      if (status[key] === "loading") {
+        status[key] = "erro";
+      }
+    }
+    onProgresso(status);
+    throw err;
   } finally {
-    await browser.close();
+    if (browser) {
+      await browser.close().catch(() => {});
+    }
   }
 }
 
@@ -512,7 +577,80 @@ function cancelarAutoAdvance(userId) {
   }
 }
 
+// Queue and Activity tracking variables
+const activeSlots = []; // Array of User IDs (max length 2)
+const queue = [];       // Array of User IDs waiting
+const userActivity = new Map(); // userId -> timestamp
+const userBusy = new Set(); // Set of userIds who are currently running Puppeteer actions
+const userChannels = new Map(); // userId -> channelId
+
+function formatarProgressoLogin(progresso) {
+  const passos = [
+    { key: "chrome", label: "Abrir Chrome" },
+    { key: "sala", label: "Acessar Sala do Futuro" },
+    { key: "perfil", label: "Selecionar perfil Estudante" },
+    { key: "ra", label: "Preencher RA" },
+    { key: "senha", label: "Preencher Senha" },
+    { key: "acessar", label: "Autenticar login" },
+    { key: "plataforma", label: "Carregar Plataformas" },
+    { key: "expansao", label: "Abrir Expansão Noturno" },
+    { key: "moodle", label: "Conectar ao Moodle" },
+    { key: "cursos", label: "Carregar cursos" }
+  ];
+
+  return passos.map(p => {
+    let icon = "⬜";
+    const status = progresso[p.key];
+    if (status === "ok") icon = "✔️";
+    else if (status === "loading") icon = "🔄";
+    else if (status === "erro") icon = "❌";
+    return `${icon} ${p.label}`;
+  }).join("\n");
+function gerenciarFila(client) {
+  const agora = Date.now();
+  const limiteInatividade = 60000; // 1 minute
+
+  for (let i = activeSlots.length - 1; i >= 0; i--) {
+    const userId = activeSlots[i];
+    
+    if (userBusy.has(userId)) {
+      userActivity.set(userId, agora);
+      continue;
+    }
+
+    const ultimaAtividade = userActivity.get(userId) || 0;
+    if (agora - ultimaAtividade > limiteInatividade) {
+      activeSlots.splice(i, 1);
+      userActivity.delete(userId);
+
+      const chanId = userChannels.get(userId);
+      if (chanId && client) {
+        client.channels.fetch(chanId).then(chan => {
+          chan.send({ content: `<@${userId}> ⚠️ Você foi desconectado por inatividade de 1 minuto para dar vaga ao próximo da fila.` }).catch(() => {});
+        }).catch(() => {});
+      }
+    }
+  }
+
+  while (activeSlots.length < 2 && queue.length > 0) {
+    const proximoUserId = queue.shift();
+    activeSlots.push(proximoUserId);
+    userActivity.set(proximoUserId, Date.now());
+
+    const chanId = userChannels.get(proximoUserId);
+    if (chanId && client) {
+      client.channels.fetch(chanId).then(chan => {
+        chan.send({ content: `<@${proximoUserId}> 🎉 Sua vez! O bot agora está liberado para você usar.` }).catch(() => {});
+      }).catch(() => {});
+    }
+  }
+}
+
 module.exports = (client) => {
+
+  setInterval(() => {
+    gerenciarFila(client);
+  }, 10000);
 
   client.on("error", (err) => console.error("❌ Discord client error:", err.message));
 
@@ -704,11 +842,63 @@ module.exports = (client) => {
     if (message.author.bot || !message.guild) return;
     if (message.content.toLowerCase() === "!expansao") {
       try { await message.delete(); } catch (_) {}
+
+      const userId = message.author.id;
+      userChannels.set(userId, message.channel.id);
+      gerenciarFila(client);
+
+      if (!activeSlots.includes(userId)) {
+        if (activeSlots.length < 2) {
+          activeSlots.push(userId);
+          userActivity.set(userId, Date.now());
+        } else {
+          if (!queue.includes(userId)) {
+            queue.push(userId);
+          }
+          const posicao = queue.indexOf(userId) + 1;
+          await message.channel.send({ content: `<@${userId}> ❌ O bot está cheio (limite de 2 usuários simultâneos). Você foi adicionado à fila.\nSua posição na fila: **${posicao}**` }).catch(() => {});
+          return;
+        }
+      }
+
       await mostrarTelaInicial(message.channel);
     }
   });
 
   client.on("interactionCreate", async (interaction) => {
+    if (!interaction.isButton() && !interaction.isStringSelectMenu() && !interaction.isModalSubmit()) return;
+
+    const userId = interaction.user.id;
+    userChannels.set(userId, interaction.channelId);
+    gerenciarFila(client);
+
+    if (!activeSlots.includes(userId)) {
+      if (activeSlots.length < 2) {
+        activeSlots.push(userId);
+        userActivity.set(userId, Date.now());
+      } else {
+        if (!queue.includes(userId)) {
+          queue.push(userId);
+        }
+        const posicao = queue.indexOf(userId) + 1;
+        try {
+          await interaction.reply({
+            flags: 64,
+            content: `❌ O bot está cheio (limite de 2 usuários simultâneos). Você está na fila.\nSua posição na fila: **${posicao}**`
+          });
+        } catch (_) {
+          try {
+            await interaction.followUp({
+              flags: 64,
+              content: `❌ O bot está cheio (limite de 2 usuários simultâneos). Você está na fila.\nSua posição na fila: **${posicao}**`
+            });
+          } catch (__) {}
+        }
+        return;
+      }
+    }
+
+    userActivity.set(userId, Date.now());
 
     if (interaction.isButton() && interaction.customId === "sf_nova_conta") {
       try {
@@ -780,8 +970,26 @@ module.exports = (client) => {
         components: [],
       });
 
+      userBusy.add(userId);
       try {
-        const { sesskey, moodleCookies, nome, moodleUserId, cursosScraped } = await moodleLogin(conta.ra, conta.dg, conta.senha);
+        const { sesskey, moodleCookies, nome, moodleUserId, cursosScraped } = await moodleLogin(
+          conta.ra,
+          conta.dg,
+          conta.senha,
+          async (progresso) => {
+            try {
+              await interaction.editReply({
+                embeds: [new EmbedBuilder()
+                  .setColor(0x5865f2)
+                  .setTitle("⏳ Entrando...")
+                  .setDescription(`🔄 Logando com a conta **${conta.nome || conta.ra}**...\n\n${formatarProgressoLogin(progresso)}`)
+                  .setFooter({ text: "Expansão Noturno • Seduc-SP" })
+                ],
+                components: [],
+              });
+            } catch (_) {}
+          }
+        );
         const cursos = (cursosScraped && cursosScraped.length) ? cursosScraped : await buscarCursosDoUsuario(sesskey, moodleCookies, moodleUserId);
         const contaAtualizada = { ...conta, sesskey, moodleCookies, nome: nome || conta.nome, moodleUserId, cursos, loginAt: Date.now() };
         salvarConta(userId, contaAtualizada);
@@ -796,6 +1004,9 @@ module.exports = (client) => {
           )],
           components: [],
         });
+      } finally {
+        userBusy.delete(userId);
+        userActivity.set(userId, Date.now());
       }
       return;
     }
@@ -810,8 +1021,26 @@ module.exports = (client) => {
         embeds: [new EmbedBuilder().setColor(0x5865f2).setTitle("⏳ Autenticando...").setDescription("🔄 Abrindo Sala do Futuro...").setFooter({ text: "Expansão Noturno • Seduc-SP" })],
       });
 
+      const userId = interaction.user.id;
+      userBusy.add(userId);
       try {
-        const { sesskey, moodleCookies, nome, moodleUserId, cursosScraped } = await moodleLogin(ra, dg, senha);
+        const { sesskey, moodleCookies, nome, moodleUserId, cursosScraped } = await moodleLogin(
+          ra,
+          dg,
+          senha,
+          async (progresso) => {
+            try {
+              await interaction.editReply({
+                embeds: [new EmbedBuilder()
+                  .setColor(0x5865f2)
+                  .setTitle("⏳ Autenticando...")
+                  .setDescription(`🔄 Abrindo Sala do Futuro...\n\n${formatarProgressoLogin(progresso)}`)
+                  .setFooter({ text: "Expansão Noturno • Seduc-SP" })
+                ]
+              });
+            } catch (_) {}
+          }
+        );
         const cursos = (cursosScraped && cursosScraped.length) ? cursosScraped : await buscarCursosDoUsuario(sesskey, moodleCookies, moodleUserId);
         const conta = { ra, dg, senha, sesskey, moodleCookies, nome: nome || `${ra}-${dg}`, moodleUserId, cursos, loginAt: Date.now() };
         salvarConta(interaction.user.id, conta);
@@ -825,6 +1054,9 @@ module.exports = (client) => {
               : `Erro inesperado: \`${err.message}\``
           )],
         });
+      } finally {
+        userBusy.delete(userId);
+        userActivity.set(userId, Date.now());
       }
       return;
     }
@@ -895,6 +1127,7 @@ module.exports = (client) => {
         components: [],
       });
 
+      userBusy.add(userId);
       rodarAtividadesSecao(sessao, itens, async ({ index, total, nome, status, concluidos }) => {
         const icons = { abrindo: "🔄", ok: "✅", erro: "⚠️" };
         const colors = { abrindo: 0x5865f2, ok: 0x2ecc71, erro: 0xe67e22 };
@@ -929,7 +1162,11 @@ module.exports = (client) => {
             components: [botoesRow],
           });
         } catch (_) {}
-      }).catch(() => {});
+      }).catch(() => {})
+      .finally(() => {
+        userBusy.delete(userId);
+        userActivity.set(userId, Date.now());
+      });
 
       return;
     }
